@@ -389,6 +389,52 @@ to-the-second delivery), and scheduled workflows are disabled after a long perio
 inactivity, so `/tick` must be idempotent and catch up on a backlog rather than assuming it
 runs exactly once per interval.
 
+### 4.7 Prompt caching — what applies, and what does not
+
+**Implicit caching is already active and already free.** It is on by default for
+Gemini 2.5 and newer (we run 3.6-flash and 3.5-flash-lite), gives a **90%
+discount on cached input tokens**, and has **no storage cost**. The minimum
+cacheable prefix is around 1,024 tokens on Flash. Nothing needs enabling.
+
+**But our prompts are currently built backwards for it.** Implicit caching
+matches on a shared *prefix*. The pipeline agents are assembled as:
+
+```
+FINDINGS_BLOCK   <- changes every single run
+...task text...
+HONESTY_RULES    <- identical across every agent and every run
+```
+
+The stable part sits at the end, where a prefix match can never reach it, so
+every agent pays full price for text that never changes. **Fix: put the constant
+block first** — HONESTY_RULES, then task text, then the per-run findings last.
+That is a reordering, not a rewrite.
+
+**It will NOT fix the free-tier quota problem.** Free-tier limits are counted in
+requests per day, not tokens, so a cache hit still burns a request. Caching buys
+latency and cost, not headroom. The fix for quota is fewer agent calls — which
+is what the orchestrator addresses.
+
+**It does not apply to Groq at all.** Its 8,000 tokens-per-minute ceiling counts
+the full request either way, so caching cannot rescue the fan-out tier there.
+That constraint is why research runs on Flash-Lite.
+
+**Explicit caching (`cachedContent`) is available but probably not worth it
+here.** `GenerateContentConfig.cachedContent` is exposed by the genai SDK and
+reachable through `LlmAgent.generateContentConfig`, so wiring it is easy. It
+guarantees the 90% discount rather than hoping for a prefix hit, but it bills
+storage — roughly **$1.00 per million tokens per hour** on Flash. For bursty
+demo traffic, storage would likely cost more than it saves. Revisit only if a
+large system prompt gets reused continuously.
+
+**Measure, do not assume.** `usageMetadata.cachedContentTokenCount` reports how
+many tokens actually came from cache. The trace layer already reads
+`usageMetadata`, so surfacing cache hits per call turns this from a claim into a
+number — worth doing in Phase 7 beside the token counts the UI already shows.
+
+**Verdict: do the prompt reordering in Phase 7 and measure it. Skip explicit
+caching** unless the numbers say otherwise.
+
 ### 4.4 Memory and preferences
 
 - **Session state** (within a run): ADK session state, `outputKey` between agents.
