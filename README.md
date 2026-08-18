@@ -7,8 +7,19 @@ under 20,000 PKR"*, *"help me buy noise-cancelling headphones"* — and a graph 
 specialised agents researches it, prices it, schedules it, checks its own work,
 and then **stops and asks before doing anything consequential**.
 
-> **Status:** Phase 0 of 8 complete — the tool layer works against live APIs.
-> No agents wired yet. See [docs/PLAN.md](docs/PLAN.md) for the full build plan.
+> **Status:** Phases 0-4 of 8 complete. The tool layer, the single-agent
+> baseline, a hand-written multi-provider `BaseLlm` adapter, the multi-agent
+> graph, and model routing with failover all run against live APIs.
+> Remaining: persistence (5), human-in-the-loop (6), frontend and deploy (7),
+> final README (8). See [docs/PLAN.md](docs/PLAN.md).
+
+## Try it
+
+```bash
+npm run agent -- "plan a weekend in Islamabad under 20000 PKR"          # baseline
+npm run agent -- --graph "plan a weekend in Islamabad under 20000 PKR"  # agent graph
+npm run agent -- --model groq/openai/gpt-oss-120b "what is 5000 PKR in USD?"
+```
 
 ---
 

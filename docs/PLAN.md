@@ -3,8 +3,11 @@
 Multi-agent personal planning assistant on Google ADK for TypeScript (`@google/adk`).
 Portfolio project, optimised for **near-zero running cost** and **maximum visible sophistication**.
 
-Status: **Phase 0 complete** — tool layer built and verified against live APIs.
-Phases 1–8 outstanding.
+Status: **Phases 0–4 complete**, verified against live APIs. Phases 5–8 outstanding.
+
+Phase 4 was pulled forward: Phase 3's graph could not run without failover,
+because a free-tier model being briefly unavailable stops the whole pipeline at
+its first agent.
 **Stack is TypeScript end-to-end — no Python anywhere.**
 
 Start at §6 Phase 0. Everything before it is the reasoning behind the decisions;
