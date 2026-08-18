@@ -7,3 +7,6 @@ dist/
 .data/
 .DS_Store
 .playwright-mcp/
+.next/
+next-env.d.ts
+out/
