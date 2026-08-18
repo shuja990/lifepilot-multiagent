@@ -58,8 +58,13 @@ export type WeatherInput = z.input<typeof WeatherInputSchema>;
 
 export const WeatherDaySchema = z.object({
   date: IsoDateSchema,
-  tempMinC: z.number(),
-  tempMaxC: z.number(),
+  /**
+   * Nullable on purpose. Open-Meteo returns null for days at the far edge of
+   * the forecast window, and substituting a number there would hand an agent a
+   * plausible-looking temperature that nothing downstream could detect as fake.
+   */
+  tempMinC: z.number().nullable(),
+  tempMaxC: z.number().nullable(),
   precipitationChancePct: z.number().min(0).max(100).nullable(),
   summary: z.string().describe('Human-readable condition, e.g. "Partly cloudy"'),
 });
@@ -88,8 +93,11 @@ export const CurrencyOutputSchema = z.object({
   to: z.string(),
   rate: z.number(),
   converted: z.number(),
-  /** ECB reference rates, published once per working day. */
-  rateDate: IsoDateSchema,
+  /**
+   * Publication date of the rate. Null when the provider did not report one —
+   * never silently backfilled with today, which would overstate freshness.
+   */
+  rateDate: IsoDateSchema.nullable(),
 });
 export type CurrencyOutput = z.infer<typeof CurrencyOutputSchema>;
 
@@ -194,7 +202,9 @@ export type SearchOutput = z.infer<typeof SearchOutputSchema>;
 export const ProductsInputSchema = z.object({
   query: z.string().min(2).describe('What to buy, e.g. "noise cancelling headphones"'),
   maxResults: z.number().int().min(1).max(10).default(5),
-  currency: CurrencyCodeSchema.default('USD'),
+  // No `currency` field: this tool cannot honour one. Advertising a parameter
+  // we ignore would let an agent pass currency:'PKR', receive USD listings, and
+  // reasonably report them as rupees.
 });
 export type ProductsInput = z.input<typeof ProductsInputSchema>;
 

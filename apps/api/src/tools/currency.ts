@@ -71,7 +71,9 @@ export async function convertCurrency(
       rate,
       // Round to minor units; agents should never see 17 decimal places.
       converted: Math.round(input.amount * rate * 100) / 100,
-      rateDate: parseRateDate(response.time_last_update_utc) ?? today,
+      // Null rather than today's date: claiming a freshness we did not observe
+      // is the same class of error as inventing a temperature.
+      rateDate: parseRateDate(response.time_last_update_utc),
     });
   });
 }

@@ -34,10 +34,13 @@ interface ForecastResponse {
   timezone: string;
   daily: {
     time: string[];
-    temperature_2m_max: number[];
-    temperature_2m_min: number[];
+    // Every one of these is nullable in practice: Open-Meteo returns null at
+    // the far edge of the forecast window. Typing them as number[] is what let
+    // a `?? 0` fabricate a 0 C reading that nothing downstream could detect.
+    temperature_2m_max: Array<number | null>;
+    temperature_2m_min: Array<number | null>;
     precipitation_probability_max: Array<number | null>;
-    weather_code: number[];
+    weather_code: Array<number | null>;
   };
 }
 
@@ -96,10 +99,12 @@ export async function getWeather(rawInput: WeatherInput): Promise<ToolResult<Wea
 
     const label = [match.name, match.admin1, match.country].filter(Boolean).join(', ');
 
+    // Nulls stay null. A missing temperature is reported as missing, never
+    // substituted: 0 C is a plausible number and an agent would act on it.
     const days = forecast.daily.time.map((date, i) => ({
       date,
-      tempMinC: forecast.daily.temperature_2m_min[i] ?? 0,
-      tempMaxC: forecast.daily.temperature_2m_max[i] ?? 0,
+      tempMinC: forecast.daily.temperature_2m_min[i] ?? null,
+      tempMaxC: forecast.daily.temperature_2m_max[i] ?? null,
       precipitationChancePct: forecast.daily.precipitation_probability_max[i] ?? null,
       summary: WMO_CODES[forecast.daily.weather_code[i] ?? -1] ?? 'Unknown',
     }));
