@@ -268,3 +268,100 @@ export const PreferencesOutputSchema = z.object({
   preferences: z.array(PreferenceSchema),
 });
 export type PreferencesOutput = z.infer<typeof PreferencesOutputSchema>;
+
+/* --------------------------------------------------------- approvals (P6) */
+
+/**
+ * The set of things LifePilot may do to the world.
+ *
+ * A closed enum, not a free string: the approval UI renders from it, the
+ * idempotency key is built from it, and "what can this system actually do?"
+ * must be answerable by reading one list.
+ */
+export const ActionKindSchema = z.enum([
+  'commit_plan',
+  'send_email',
+  'create_calendar_event',
+  'book',
+  'purchase',
+]);
+export type ActionKind = z.infer<typeof ActionKindSchema>;
+
+export const ApprovalRequestSchema = z.object({
+  userId: z.string().min(1),
+  action: ActionKindSchema,
+  /** One line the human reads before deciding. Plain language, no jargon. */
+  summary: z.string().min(3).max(300),
+  /** What will actually happen, itemised. The reader must not need the code. */
+  details: z.string().min(3).max(4000),
+  /** Money involved, when there is any. Null keeps "free" distinct from "unknown". */
+  estimatedCost: z.string().nullable(),
+});
+export type ApprovalRequest = z.input<typeof ApprovalRequestSchema>;
+
+export const ApprovalStatusSchema = z.enum(['pending', 'approved', 'rejected']);
+export type ApprovalStatus = z.infer<typeof ApprovalStatusSchema>;
+
+/**
+ * Three outcomes, not two.
+ *
+ * A rejection carries a reason so it can be routed back into planning rather
+ * than dead-ending in an apology, and an approval can carry edits so the human
+ * can correct a detail without restarting the whole plan.
+ */
+export const ApprovalDecisionSchema = z.object({
+  approvalId: z.string().min(1),
+  status: z.enum(['approved', 'rejected']),
+  reason: z.string().max(1000).optional(),
+  modifications: z.string().max(2000).optional(),
+  decidedBy: z.string().default('user'),
+});
+export type ApprovalDecision = z.input<typeof ApprovalDecisionSchema>;
+
+export const PendingApprovalSchema = z.object({
+  approvalId: z.string(),
+  userId: z.string(),
+  sessionId: z.string(),
+  /** Needed to resume: the response must answer the call that asked. */
+  functionCallId: z.string(),
+  invocationId: z.string().nullable(),
+  action: ActionKindSchema,
+  summary: z.string(),
+  details: z.string(),
+  estimatedCost: z.string().nullable(),
+  status: ApprovalStatusSchema,
+  createdAt: z.string(),
+});
+export type PendingApproval = z.infer<typeof PendingApprovalSchema>;
+
+/* ------------------------------------------------------------- plans (P6) */
+
+export const CommitPlanInputSchema = z.object({
+  userId: z.string().min(1),
+  title: z.string().min(3).max(200),
+  /** The plan itself, as markdown. */
+  body: z.string().min(10),
+  /** Dated milestones that become calendar entries and future reminders. */
+  milestones: z
+    .array(
+      z.object({
+        title: z.string().min(2).max(200),
+        /** ISO-8601 instant. */
+        at: z.string().min(10),
+        note: z.string().max(500).optional(),
+      }),
+    )
+    .default([]),
+});
+export type CommitPlanInput = z.input<typeof CommitPlanInputSchema>;
+
+export const CommitPlanOutputSchema = z.object({
+  planId: z.string(),
+  /** Shareable page. Real durable write — the outward-facing part. */
+  url: z.string(),
+  /** Calendar file, so no OAuth scope is ever required. */
+  icsPath: z.string().nullable(),
+  scheduledNotifications: z.number().int().min(0),
+  alreadyCommitted: z.boolean().describe('True when idempotency caught a repeat'),
+});
+export type CommitPlanOutput = z.infer<typeof CommitPlanOutputSchema>;

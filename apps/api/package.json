@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "agent": "tsx src/run.ts"
+    "agent": "tsx src/run.ts",
+    "approve": "tsx src/approve.ts",
+    "tick": "tsx src/tick.ts"
   },
   "dependencies": {
     "@google/adk": "1.6.0",

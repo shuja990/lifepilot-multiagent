@@ -15,6 +15,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "tool": "npm run tool --workspace @lifepilot/api --",
-    "agent": "npm run agent --workspace @lifepilot/api --"
+    "agent": "npm run agent --workspace @lifepilot/api --",
+    "approve": "npm run approve --workspace @lifepilot/api --"
   }
 }

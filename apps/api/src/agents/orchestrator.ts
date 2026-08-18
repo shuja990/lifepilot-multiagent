@@ -21,6 +21,7 @@
 import { LlmAgent } from '@google/adk';
 import { createRoutedFast } from '../config/routing.js';
 import { ALL_TOOLS } from '../tools/index.js';
+import { commitPlanTool, requestApprovalTool } from '../tools/approval.js';
 import { createPlanningGraph } from './pipeline.js';
 
 /**
@@ -57,6 +58,47 @@ Rules that do not bend:
   });
 }
 
+/**
+ * The only agent allowed to change anything outside this process.
+ *
+ * Separated from the planners on purpose: everything upstream reads and
+ * reasons, and exactly one agent acts. That boundary is what makes the blast
+ * radius reviewable — the answer to "what can this system do to the world?"
+ * is this agent's tool list.
+ */
+export function createCommitAgent(): LlmAgent {
+  return new LlmAgent({
+    name: 'commit_agent',
+    model: createRoutedFast(),
+    description:
+      'Saves, commits or schedules a plan the user already has, and asks for ' +
+      'approval before doing anything consequential. Use when the user says ' +
+      'save this, commit it, schedule it, or remind me.',
+    instruction: `
+You perform actions that affect the real world. You do not plan; the plan
+already exists in the conversation.
+
+Always call request_approval FIRST. Never act before a human has approved.
+
+Write summary and details for a non-technical reader deciding whether to let
+this happen: what will be saved, what reminders will fire and when, and what it
+costs. No jargon, no internal identifiers.
+
+Calling request_approval ends your turn. Do not guess the decision, do not
+proceed hopefully, and do not call commit_plan in the same turn.
+
+Once you are told the decision:
+- approved: call commit_plan with the approvalId, then report the shareable link
+  and the reminders that were scheduled.
+- rejected: say so plainly, repeat the reason given, and change nothing.
+
+Milestone times must be real ISO-8601 instants in the future. If you do not know
+a real date, do not invent one — say which one you need.
+`.trim(),
+    tools: [requestApprovalTool, commitPlanTool],
+  });
+}
+
 export const ORCHESTRATOR_INSTRUCTION = `
 You are LifePilot's orchestrator. You do not answer the user yourself. Your only
 job is to hand the request to the right specialist.
@@ -66,6 +108,10 @@ Choose one:
 **quick_answer** — the user wants a fact or a single lookup. A currency
 conversion, a weather check, "find me a pharmacy near X", one web search,
 recording or recalling a preference. The answer is a sentence, not a plan.
+
+**commit_agent** — the user wants something SAVED, committed, scheduled, sent
+or booked. Anything with a real-world effect. This path always asks for human
+approval before acting.
 
 **lifepilot_graph** — the user wants something planned, compared, costed or
 scheduled. A trip, an event, a purchase decision, a budget. It needs research
@@ -104,6 +150,6 @@ export function createOrchestrator(): LlmAgent {
     model: createRoutedFast(),
     description: 'Routes a user goal to the specialist best suited to it.',
     instruction: ORCHESTRATOR_INSTRUCTION,
-    subAgents: [createQuickAnswerAgent(), createPlanningGraph()],
+    subAgents: [createQuickAnswerAgent(), createCommitAgent(), createPlanningGraph()],
   });
 }

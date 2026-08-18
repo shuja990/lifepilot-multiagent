@@ -8,7 +8,7 @@
  * final answer, plus wall-clock time and a tool-call count. Those last two are
  * the numbers Phase 3 needs to compare the agent graph against this baseline.
  */
-import { Runner } from '@google/adk';
+import { Runner, createResumabilityConfig } from '@google/adk';
 import { createBaselineAgent } from './agents/baseline.js';
 import { INITIAL_STATE, createPlanningGraph } from './agents/pipeline.js';
 import { createOrchestrator } from './agents/orchestrator.js';
@@ -76,7 +76,14 @@ async function main(): Promise<void> {
         : 'agent: orchestrator',
   );
   const sessionService = getSessionService();
-  const runner = new Runner({ agent, appName: APP_NAME, sessionService });
+  const runner = new Runner({
+    agent,
+    appName: APP_NAME,
+    sessionService,
+    // Required for the approval gate: without it a function response starts a
+    // new turn instead of resuming the suspended call.
+    resumabilityConfig: createResumabilityConfig({ isResumable: true }),
+  });
   console.log(`sessions: ${isPersistent() ? 'postgres' : 'in-memory'}`);
 
   const session =
