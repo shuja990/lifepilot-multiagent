@@ -32,6 +32,8 @@ import {
   listPendingApprovals,
 } from './memory/approvals.js';
 import { getSessionService, isPersistent } from './memory/stores.js';
+import { listConversations, titleFrom, touchConversation, deleteConversation } from './memory/conversations.js';
+import { getPreferences, savePreference } from './tools/preferences.js';
 import { runTick } from './tick.js';
 
 const APP_NAME = 'lifepilot';
@@ -47,7 +49,25 @@ app.get('/health', (c) =>
 
 /* -------------------------------------------------------------------- chat */
 
-function buildRunner(mode: string) {
+/**
+ * Runners are built once per mode and reused for every request.
+ *
+ * This is not an optimisation. ADK stamps a parent onto each sub-agent when a
+ * workflow agent is composed, so constructing the graph a second time throws
+ *
+ *   Agent "intake" already has a parent agent, current parent: "lifepilot_graph"
+ *
+ * The CLI never hit it because it builds the tree once and exits; the server
+ * built one per request, so the FIRST /chat succeeded and every one after it
+ * returned 500. Agents are stateless — all per-conversation state lives in the
+ * session — so a single tree is the intended shape.
+ */
+const runners = new Map<string, Runner>();
+
+function buildRunner(mode: string): Runner {
+  const cached = runners.get(mode);
+  if (cached) return cached;
+
   const agent =
     mode === 'baseline'
       ? createBaselineAgent()
@@ -55,13 +75,16 @@ function buildRunner(mode: string) {
         ? createPlanningGraph()
         : createOrchestrator();
 
-  return new Runner({
+  const runner = new Runner({
     agent,
     appName: APP_NAME,
     sessionService: getSessionService(),
     // Required so an approval decision resumes the suspended call.
     resumabilityConfig: createResumabilityConfig({ isResumable: true }),
   });
+
+  runners.set(mode, runner);
+  return runner;
 }
 
 /**
@@ -97,6 +120,8 @@ app.post('/chat', async (c) => {
     }));
 
   const runner = buildRunner(mode);
+  // Index it for the history sidebar. The first message becomes the title.
+  await touchConversation(session.id, userId, titleFrom(message));
 
   return streamSSE(c, async (stream) => {
     // Sent first so the client can resume this conversation later, even if the
@@ -126,6 +151,70 @@ app.post('/chat', async (c) => {
       });
     }
   });
+});
+
+/* ---------------------------------------------------------------- history */
+
+app.get('/sessions', async (c) => {
+  const userId = c.req.query('userId')?.trim();
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+  return c.json({ sessions: await listConversations(userId) });
+});
+
+/**
+ * Replays one conversation.
+ *
+ * The transcript is rebuilt from the session's stored events through the same
+ * formatter the live stream uses, so history and live output cannot drift
+ * apart — a reopened conversation looks exactly like it did when it ran.
+ */
+app.get('/sessions/:id', async (c) => {
+  const userId = c.req.query('userId')?.trim();
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  const session = await getSessionService().getSession({
+    appName: APP_NAME,
+    userId,
+    sessionId: c.req.param('id'),
+  });
+  if (!session) return c.json({ error: 'not found' }, 404);
+
+  const entries = (session.events ?? []).flatMap((event) => toTraceEntries(event));
+  return c.json({ sessionId: session.id, entries });
+});
+
+app.delete('/sessions/:id', async (c) => {
+  const userId = c.req.query('userId')?.trim();
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  await deleteConversation(c.req.param('id'), userId);
+  // The ADK session is left in place: deleting the index entry removes it from
+  // the sidebar, while the transcript stays recoverable by id.
+  return c.json({ ok: true });
+});
+
+/* ------------------------------------------------------------ preferences */
+
+app.get('/preferences', async (c) => {
+  const userId = c.req.query('userId')?.trim();
+  if (!userId) return c.json({ error: 'userId is required' }, 400);
+
+  const result = await getPreferences({ userId });
+  return result.ok ? c.json(result.data) : c.json({ error: result.error }, 500);
+});
+
+app.post('/preferences', async (c) => {
+  const body = await c.req.json<{ userId?: string; key?: string; value?: string }>();
+  if (!body.userId || !body.key || !body.value) {
+    return c.json({ error: 'userId, key and value are required' }, 400);
+  }
+
+  const result = await savePreference({
+    userId: body.userId,
+    key: body.key as never,
+    value: body.value,
+  });
+  return result.ok ? c.json(result.data) : c.json({ error: result.error }, 400);
 });
 
 /* --------------------------------------------------------------- approvals */

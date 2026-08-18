@@ -11,7 +11,7 @@ import type { Event } from '@google/adk';
 export interface TraceEntry {
   /** Which agent emitted this — the label on the timeline card. */
   author: string;
-  kind: 'text' | 'tool-call' | 'tool-result' | 'error' | 'other';
+  kind: 'text' | 'tool-call' | 'tool-result' | 'error' | 'other' | 'user';
   /** Tool name, for tool-call and tool-result entries. */
   tool?: string;
   /** Arguments the model chose. This is the interesting part of a tool call. */
@@ -73,7 +73,13 @@ export function toTraceEntries(event: Event): TraceEntry[] {
     }
 
     if (part.text && part.text.trim()) {
-      entries.push({ author, kind: 'text', text: part.text });
+      // The user's own turns are tagged so a replayed transcript renders them
+      // the same way the live view does, instead of as another agent card.
+      const isUser = author === 'user';
+      const text = isUser ? stripInternalScaffolding(part.text) : part.text;
+      if (text.trim()) {
+        entries.push({ author, kind: isUser ? 'user' : 'text', text });
+      }
     }
   }
 
@@ -102,6 +108,18 @@ function summarise(response: { ok?: boolean; error?: string; data?: unknown } | 
   return String(data ?? '').slice(0, 80);
 }
 
+/**
+ * Removes the plumbing we append to a user's message.
+ *
+ * The agent needs the user id to read and write preferences and cannot know it
+ * otherwise, so it is appended to the prompt. That is an implementation detail:
+ * replaying a conversation showed the user their own message with an
+ * instruction to the model stapled to the end of it.
+ */
+function stripInternalScaffolding(text: string): string {
+  return text.replace(/\s*\(Your user_id for preference tools is "[^"]*"\.\)\s*$/, '').trim();
+}
+
 /** ANSI-free rendering of one entry, for the terminal and for logs. */
 export function formatTraceEntry(entry: TraceEntry): string {
   switch (entry.kind) {
@@ -113,6 +131,7 @@ export function formatTraceEntry(entry: TraceEntry): string {
       return `  <- ${entry.tool}: ${entry.ok ? '' : 'FAILED '}${entry.summary ?? ''}`;
     case 'error':
       return `  !! ${entry.author}: ${entry.summary ?? 'unknown error'}`;
+    case 'user':
     case 'text':
       return `[${entry.author}] ${entry.text?.trim()}`;
     default:
