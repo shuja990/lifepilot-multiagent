@@ -67,6 +67,26 @@ interface OpenAIResponse {
   error?: { message?: string; code?: string | number; type?: string };
 }
 
+/**
+ * Raised for any upstream failure.
+ *
+ * This THROWS rather than yielding an error response, and the distinction is
+ * load-bearing: RoutedLlm only fails over when a model throws *before* yielding.
+ * An earlier version yielded `{ errorCode }` instead, which looked tidier and
+ * silently disabled failover — a Groq 429 ended the run even though a healthy
+ * Gemini fallback was configured and waiting.
+ */
+export class ProviderError extends Error {
+  constructor(
+    message: string,
+    readonly provider: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'ProviderError';
+  }
+}
+
 /* ------------------------------------------------------------- the adapter */
 
 export class OpenAICompatibleLlm extends BaseLlm {
@@ -111,13 +131,10 @@ export class OpenAICompatibleLlm extends BaseLlm {
   ): AsyncGenerator<LlmResponse, void> {
     const apiKey = optionalEnv(this.provider.apiKeyEnv);
     if (!apiKey) {
-      // Surfaced as a response rather than thrown: a missing optional provider
-      // should degrade the run, not crash it, and RoutedLlm can fail over.
-      yield {
-        errorCode: 'MISSING_API_KEY',
-        errorMessage: `${this.provider.apiKeyEnv} is not set, so model "${this.model}" cannot be used.`,
-      };
-      return;
+      throw new ProviderError(
+        `${this.provider.apiKeyEnv} is not set, so model "${this.model}" cannot be used.`,
+        this.providerName,
+      );
     }
 
     const body = {
@@ -133,28 +150,17 @@ export class OpenAICompatibleLlm extends BaseLlm {
       stream,
     };
 
-    const response = await fetch(`${this.provider.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json',
-        // OpenRouter asks for attribution headers; harmless elsewhere.
-        'http-referer': 'https://github.com/shuja990/lifepilot-multiagent',
-        'x-title': 'LifePilot',
-      },
-      body: JSON.stringify(body),
-      ...(abortSignal ? { signal: abortSignal } : {}),
-    });
+    const response = await this.fetchWithRetry(apiKey, body, abortSignal);
 
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
-      yield {
-        errorCode: String(response.status),
-        errorMessage: `${this.providerName} returned HTTP ${response.status}${
-          detail ? `: ${detail.slice(0, 400)}` : ''
-        }`,
-      };
-      return;
+      // Thrown, so RoutedLlm can try the next provider. 429 and 5xx are the
+      // whole reason the fallback chain exists.
+      throw new ProviderError(
+        `${this.providerName} returned HTTP ${response.status}${detail ? `: ${detail.slice(0, 400)}` : ''}`,
+        this.providerName,
+        response.status,
+      );
     }
 
     if (stream) {
@@ -164,8 +170,11 @@ export class OpenAICompatibleLlm extends BaseLlm {
 
     const json = (await response.json()) as OpenAIResponse;
     if (json.error) {
-      yield { errorCode: String(json.error.code ?? 'error'), errorMessage: json.error.message };
-      return;
+      // Some providers return 200 with an error body.
+      throw new ProviderError(
+        json.error.message ?? 'unknown provider error',
+        this.providerName,
+      );
     }
 
     const choice = json.choices?.[0];
@@ -182,6 +191,53 @@ export class OpenAICompatibleLlm extends BaseLlm {
           }
         : {}),
     };
+  }
+
+  /**
+   * POSTs the request, retrying a rate limit or transient outage once.
+   *
+   * Free tiers are tight and bursty: Groq allows 8,000 tokens per MINUTE, which
+   * a four-way parallel research swarm exceeds on its first turn. Failing over
+   * to another provider is the wrong first response when the provider has told
+   * us exactly how long to wait — it just moves the load onto the next free
+   * tier and exhausts that one too.
+   *
+   * So: honour the stated delay once, then let RoutedLlm fail over if it is
+   * still failing. The delay is capped, because a demo that stalls for 60s is
+   * no better than one that errors.
+   */
+  private async fetchWithRetry(
+    apiKey: string,
+    body: unknown,
+    abortSignal?: AbortSignal,
+  ): Promise<Response> {
+    const MAX_WAIT_MS = 15_000;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await fetch(`${this.provider.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          'content-type': 'application/json',
+          // OpenRouter asks for attribution headers; harmless elsewhere.
+          'http-referer': 'https://github.com/shuja990/lifepilot-multiagent',
+          'x-title': 'LifePilot',
+        },
+        body: JSON.stringify(body),
+        ...(abortSignal ? { signal: abortSignal } : {}),
+      });
+
+      const worthRetrying = response.status === 429 || response.status >= 500;
+      if (!worthRetrying || attempt === 1) return response;
+
+      const waitMs = await retryDelayMs(response);
+      if (waitMs === undefined || waitMs > MAX_WAIT_MS) return response;
+
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+
+    // Unreachable: the loop always returns.
+    throw new ProviderError('retry loop exited unexpectedly', this.providerName);
   }
 
   override connect(): Promise<BaseLlmConnection> {
@@ -466,6 +522,34 @@ export function geminiSchemaToJsonSchema(schema: unknown): Record<string, unknow
 }
 
 /* ------------------------------------------------------------------ utils */
+
+/**
+ * How long to wait before retrying, from the provider's own signal.
+ *
+ * Prefers the Retry-After header, then the delay Groq embeds in its message
+ * ("Please try again in 12.2475s"), then a fixed fallback. A small buffer is
+ * added because the stated window is when the bucket refills, not when a
+ * request is safely accepted.
+ *
+ * Reads response.clone() so the caller can still consume the original body.
+ */
+async function retryDelayMs(response: Response): Promise<number | undefined> {
+  const header = response.headers.get('retry-after');
+  if (header) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds)) return seconds * 1000 + 250;
+  }
+
+  try {
+    const text = await response.clone().text();
+    const match = /try again in ([0-9.]+)s/i.exec(text);
+    if (match?.[1]) return Number(match[1]) * 1000 + 250;
+  } catch {
+    // fall through
+  }
+
+  return response.status >= 500 ? 1_000 : 2_000;
+}
 
 function contentToText(content: Content): string {
   return (content.parts ?? []).map((p) => p.text ?? '').join('');

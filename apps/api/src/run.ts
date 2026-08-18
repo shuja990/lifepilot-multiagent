@@ -10,8 +10,10 @@
  */
 import { InMemoryRunner } from '@google/adk';
 import { createBaselineAgent } from './agents/baseline.js';
+import { INITIAL_STATE, createPlanningGraph } from './agents/pipeline.js';
 import { formatTraceEntry, toTraceEntries } from './lib/trace.js';
 import { requireEnv } from './config/env.js';
+import { MODELS } from './config/models.js';
 
 const APP_NAME = 'lifepilot';
 
@@ -33,19 +35,31 @@ async function main(): Promise<void> {
     argv.splice(modelFlag, 2);
   }
 
+  // --graph runs the Phase 3 multi-agent pipeline instead of the baseline.
+  const useGraph = argv.includes('--graph');
+  if (useGraph) argv.splice(argv.indexOf('--graph'), 1);
+
   const prompt = argv.join(' ').trim();
   if (!prompt) {
-    console.error('Usage: npm run agent -- [--user <id>] [--model <provider/model>] "<your goal>"');
+    console.error('Usage: npm run agent -- [--user <id>] [--model <provider/model>] [--graph] "<your goal>"');
     process.exit(1);
   }
 
   // Only Gemini needs this; other providers carry their own key check.
   if (!model) requireEnv('GOOGLE_API_KEY');
 
-  const agent = createBaselineAgent(model);
-  console.log(`model: ${agent.model as string}`);
+  const agent = useGraph ? createPlanningGraph() : createBaselineAgent(model);
+  console.log(
+    useGraph ? 'agent: multi-agent graph' : `agent: baseline (${model ?? MODELS.default})`,
+  );
   const runner = new InMemoryRunner({ agent, appName: APP_NAME });
-  const session = await runner.sessionService.createSession({ appName: APP_NAME, userId });
+  const session = await runner.sessionService.createSession({
+    appName: APP_NAME,
+    userId,
+    // Seeded so one failed branch degrades the plan instead of breaking every
+    // downstream instruction template.
+    ...(useGraph ? { state: { ...INITIAL_STATE } } : {}),
+  });
 
   console.log(`\n> ${prompt}\n`);
 
