@@ -11,6 +11,7 @@
 import { InMemoryRunner } from '@google/adk';
 import { createBaselineAgent } from './agents/baseline.js';
 import { INITIAL_STATE, createPlanningGraph } from './agents/pipeline.js';
+import { createOrchestrator } from './agents/orchestrator.js';
 import { formatTraceEntry, toTraceEntries } from './lib/trace.js';
 import { requireEnv } from './config/env.js';
 import { MODELS } from './config/models.js';
@@ -35,22 +36,35 @@ async function main(): Promise<void> {
     argv.splice(modelFlag, 2);
   }
 
-  // --graph runs the Phase 3 multi-agent pipeline instead of the baseline.
+  // Default is the orchestrator — the whole system, routing included.
+  // --graph forces the deterministic pipeline, which is what the Phase 3
+  // comparison against the baseline measures.
+  // --baseline is the Phase 1 control.
   const useGraph = argv.includes('--graph');
   if (useGraph) argv.splice(argv.indexOf('--graph'), 1);
+  const useBaseline = argv.includes('--baseline');
+  if (useBaseline) argv.splice(argv.indexOf('--baseline'), 1);
 
   const prompt = argv.join(' ').trim();
   if (!prompt) {
-    console.error('Usage: npm run agent -- [--user <id>] [--model <provider/model>] [--graph] "<your goal>"');
+    console.error('Usage: npm run agent -- [--user <id>] [--model <m>] [--graph|--baseline] "<goal>"');
     process.exit(1);
   }
 
   // Only Gemini needs this; other providers carry their own key check.
   if (!model) requireEnv('GOOGLE_API_KEY');
 
-  const agent = useGraph ? createPlanningGraph() : createBaselineAgent(model);
+  const agent = useBaseline
+    ? createBaselineAgent(model)
+    : useGraph
+      ? createPlanningGraph()
+      : createOrchestrator();
   console.log(
-    useGraph ? 'agent: multi-agent graph' : `agent: baseline (${model ?? MODELS.default})`,
+    useBaseline
+      ? `agent: baseline (${model ?? MODELS.default})`
+      : useGraph
+        ? 'agent: deterministic pipeline'
+        : 'agent: orchestrator',
   );
   const runner = new InMemoryRunner({ agent, appName: APP_NAME });
   const session = await runner.sessionService.createSession({
@@ -58,7 +72,7 @@ async function main(): Promise<void> {
     userId,
     // Seeded so one failed branch degrades the plan instead of breaking every
     // downstream instruction template.
-    ...(useGraph ? { state: { ...INITIAL_STATE } } : {}),
+    ...(useBaseline ? {} : { state: { ...INITIAL_STATE } }),
   });
 
   console.log(`\n> ${prompt}\n`);

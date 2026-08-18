@@ -18,11 +18,22 @@ import { envFlag, optionalEnv } from './env.js';
  */
 LLMRegistry.register(OpenAICompatibleLlm);
 
+/**
+ * Model ids are PINNED, never `-latest`.
+ *
+ * `gemini-flash-latest` resolved to `gemini-3.7-flash`, whose free tier allows
+ * 20 requests per DAY — not the ~1,500 the plan was costed against. The alias
+ * had quietly drifted onto the newest premium model, and the only symptom was
+ * the whole system 429ing after a handful of runs and blaming "quota".
+ *
+ * Same lesson as pinning the ADK version: a moving alias is not a dependency
+ * you control. Re-check deliberately, do not inherit silently.
+ */
 export const MODELS = {
   /** Every agent's default. Free tier, good function calling. */
-  default: optionalEnv('GEMINI_MODEL_DEFAULT', 'gemini-flash-latest'),
+  default: optionalEnv('GEMINI_MODEL_DEFAULT', 'gemini-3.6-flash'),
   /** High-volume, low-judgement work: extraction, classification. */
-  fast: optionalEnv('GEMINI_MODEL_FAST', 'gemini-flash-lite-latest'),
+  fast: optionalEnv('GEMINI_MODEL_FAST', 'gemini-3.5-flash-lite'),
   /**
    * Non-Gemini tiers. Empty keys make these inert rather than broken: the
    * adapter reports a missing key as a response, so a run degrades instead of

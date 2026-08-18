@@ -62,6 +62,8 @@ request), call save_preference to record it.
 
 Then output a compact spec with these headings and nothing else:
 GOAL: one sentence.
+GOAL_TYPE: exactly one of trip | purchase | event | budget | other. Downstream
+agents skip themselves based on this, so it must be accurate.
 CONSTRAINTS: budget with currency, dates, party size, hard limits. Mark anything
 you had to assume as ASSUMED.
 LOCATION: the place this concerns, as specifically as you can state it.
@@ -103,8 +105,11 @@ const placeResearchAgent = new LlmAgent({
 Spec:
 {goal_spec}
 
-Find REAL places relevant to this goal using find_places — the venues, food,
-lodging or landmarks it needs. Geocode the location first if it is ambiguous.
+If GOAL_TYPE is "purchase" or "budget", this goal probably needs no venues.
+Reply exactly "No places in scope." and stop, without calling a tool.
+
+Otherwise find REAL places relevant to this goal using find_places — the venues,
+food, lodging or landmarks it needs. Geocode the location first if ambiguous.
 
 Report each as: name, address, distance. These come from OpenStreetMap, so you
 must NOT rank them by quality or popularity — you have no such data. Present
@@ -148,8 +153,10 @@ const priceResearchAgent = new LlmAgent({
 Spec:
 {goal_spec}
 
-If this goal involves buying a product, call find_products and list the real
-listings with retailer and link.
+If GOAL_TYPE in the spec is not "purchase", reply exactly "No purchase in scope."
+and stop. Do not call any tool. Deciding this costs a call, so decide fast.
+
+Otherwise call find_products and list the real listings with retailer and link.
 
 find_products NEVER returns prices. Do not state or infer one. Say the listing
 must be opened to confirm price and availability.
