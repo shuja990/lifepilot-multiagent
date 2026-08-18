@@ -12,7 +12,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runTool } from '../lib/http.js';
-import { dataDir } from '../config/env.js';
+import { dataDir, optionalEnv } from '../config/env.js';
+import { PostgresPreferenceStore, registerClosablePreferenceStore } from '../memory/stores.js';
 import {
   GetPreferencesInputSchema,
   PreferencesOutputSchema,
@@ -105,9 +106,29 @@ export class JsonFilePreferenceStore implements PreferenceStore {
   }
 }
 
-let store: PreferenceStore = new JsonFilePreferenceStore();
+let store: PreferenceStore | undefined;
 
-/** Swap the backing store — used by Phase 5 and by tests. */
+/**
+ * Postgres when DATABASE_URL is set, a JSON file otherwise.
+ *
+ * Resolved lazily rather than at import so that tests, and anyone without
+ * credentials, never open a pool they do not use.
+ */
+function getStore(): PreferenceStore {
+  if (store) return store;
+
+  const url = optionalEnv('DATABASE_URL');
+  if (url) {
+    const postgres = new PostgresPreferenceStore(url);
+    registerClosablePreferenceStore(postgres);
+    store = postgres;
+  } else {
+    store = new JsonFilePreferenceStore();
+  }
+  return store;
+}
+
+/** Swap the backing store — used by tests. */
 export function setPreferenceStore(next: PreferenceStore): void {
   store = next;
 }
@@ -122,7 +143,7 @@ export async function savePreference(
       value: input.value,
       updatedAt: new Date().toISOString(),
     };
-    await store.put(input.userId, preference);
+    await getStore().put(input.userId, preference);
     return preference;
   });
 }
@@ -132,7 +153,7 @@ export async function getPreferences(
 ): Promise<ToolResult<PreferencesOutput>> {
   return runTool(async () => {
     const input = GetPreferencesInputSchema.parse(rawInput);
-    const preferences = await store.get(input.userId);
+    const preferences = await getStore().get(input.userId);
     return PreferencesOutputSchema.parse({ userId: input.userId, preferences });
   });
 }

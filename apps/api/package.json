@@ -14,10 +14,13 @@
     "@google/adk": "1.6.0",
     "@lifepilot/shared": "*",
     "dotenv": "^16.4.5",
-    "zod": "^4.2.1"
+    "zod": "^4.2.1",
+    "pg": "^8.13.0",
+    "@mikro-orm/postgresql": "^6.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

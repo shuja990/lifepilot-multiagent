@@ -8,13 +8,14 @@
  * final answer, plus wall-clock time and a tool-call count. Those last two are
  * the numbers Phase 3 needs to compare the agent graph against this baseline.
  */
-import { InMemoryRunner } from '@google/adk';
+import { Runner } from '@google/adk';
 import { createBaselineAgent } from './agents/baseline.js';
 import { INITIAL_STATE, createPlanningGraph } from './agents/pipeline.js';
 import { createOrchestrator } from './agents/orchestrator.js';
 import { formatTraceEntry, toTraceEntries } from './lib/trace.js';
 import { requireEnv } from './config/env.js';
 import { MODELS } from './config/models.js';
+import { closeStores, getSessionService, isPersistent } from './memory/stores.js';
 
 const APP_NAME = 'lifepilot';
 
@@ -45,6 +46,14 @@ async function main(): Promise<void> {
   const useBaseline = argv.includes('--baseline');
   if (useBaseline) argv.splice(argv.indexOf('--baseline'), 1);
 
+  // --session resumes an existing conversation instead of starting one.
+  let sessionId: string | undefined;
+  const sessionFlag = argv.indexOf('--session');
+  if (sessionFlag !== -1) {
+    sessionId = argv[sessionFlag + 1];
+    argv.splice(sessionFlag, 2);
+  }
+
   const prompt = argv.join(' ').trim();
   if (!prompt) {
     console.error('Usage: npm run agent -- [--user <id>] [--model <m>] [--graph|--baseline] "<goal>"');
@@ -66,14 +75,26 @@ async function main(): Promise<void> {
         ? 'agent: deterministic pipeline'
         : 'agent: orchestrator',
   );
-  const runner = new InMemoryRunner({ agent, appName: APP_NAME });
-  const session = await runner.sessionService.createSession({
-    appName: APP_NAME,
-    userId,
-    // Seeded so one failed branch degrades the plan instead of breaking every
-    // downstream instruction template.
-    ...(useBaseline ? {} : { state: { ...INITIAL_STATE } }),
-  });
+  const sessionService = getSessionService();
+  const runner = new Runner({ agent, appName: APP_NAME, sessionService });
+  console.log(`sessions: ${isPersistent() ? 'postgres' : 'in-memory'}`);
+
+  const session =
+    (sessionId
+      ? await sessionService.getSession({ appName: APP_NAME, userId, sessionId })
+      : undefined) ??
+    (await sessionService.createSession({
+      appName: APP_NAME,
+      userId,
+      // Seeded so one failed branch degrades the plan instead of breaking every
+      // downstream instruction template.
+      ...(useBaseline ? {} : { state: { ...INITIAL_STATE } }),
+    }));
+
+  if (sessionId && session.id !== sessionId) {
+    console.log(`(session ${sessionId} not found — started a new one)`);
+  }
+  console.log(`session: ${session.id}`);
 
   console.log(`\n> ${prompt}\n`);
 
@@ -109,7 +130,13 @@ async function main(): Promise<void> {
   console.log(finalText.trim() || '(no final answer)');
   console.log(`\n${'-'.repeat(70)}`);
   console.log(`${elapsed}s, ${toolCalls} tool calls`);
-  if (failed) process.exit(1);
+  // Release DB handles, or the process lingers with the event loop held open.
+  await closeStores();
+
+  // Exit explicitly. Pooled database connections can still hold the event loop
+  // even after close(), and a CLI that prints its answer and then hangs is a
+  // worse bug than a slightly blunt exit.
+  process.exit(failed ? 1 : 0);
 }
 
 main().catch((error: unknown) => {
