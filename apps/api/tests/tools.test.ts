@@ -15,6 +15,7 @@ import { ZodError } from 'zod';
 
 import { ToolFailure, toToolError } from '../src/lib/http.js';
 import { JsonFilePreferenceStore } from '../src/tools/preferences.js';
+import { findSchemaViolations } from '../src/tools/schema-guard.js';
 import { WeatherDaySchema, CurrencyOutputSchema, ProductsInputSchema } from '@lifepilot/shared';
 
 async function tempStoreFile(): Promise<string> {
@@ -146,4 +147,24 @@ test('product search does not advertise a currency parameter it cannot honour', 
     !('currency' in parsed),
     'an accepted currency arg would let an agent report USD listings as PKR',
   );
+});
+
+/* -------------------------------------------- Gemini schema compatibility */
+
+test('every tool schema stays inside the Gemini function-declaration subset', async () => {
+  const { ALL_TOOLS } = await import('../src/tools/index.js');
+  const { assertGeminiCompatible } = await import('../src/tools/schema-guard.js');
+
+  // z.number().positive() emitted exclusiveMinimum and Gemini rejected the whole
+  // request with a 400 naming only an array index. Fail here instead.
+  assertGeminiCompatible(ALL_TOOLS as unknown as Array<{ _getDeclaration(): unknown }>);
+});
+
+test('the schema guard actually catches an unsupported keyword', () => {
+  const violations = findSchemaViolations('demo', {
+    name: 'demo',
+    parameters: { properties: { amount: { type: 'number', exclusiveMinimum: 0 } } },
+  });
+  assert.equal(violations.length, 1);
+  assert.equal(violations[0]?.keyword, 'exclusiveMinimum');
 });

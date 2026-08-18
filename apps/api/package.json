@@ -7,7 +7,8 @@
     "tool": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test tests/tools.test.ts"
+    "test": "node --import tsx --test tests/tools.test.ts",
+    "agent": "tsx src/run.ts"
   },
   "dependencies": {
     "@google/adk": "1.6.0",

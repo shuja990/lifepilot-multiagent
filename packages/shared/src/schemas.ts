@@ -81,7 +81,10 @@ export type WeatherOutput = z.infer<typeof WeatherOutputSchema>;
 /* ---------------------------------------------------------------- currency */
 
 export const CurrencyInputSchema = z.object({
-  amount: z.number().positive().default(1),
+  // .min(0), not .positive(): `positive()` serialises to `exclusiveMinimum`,
+  // which the Gemini function-declaration schema rejects outright with a 400.
+  // See assertGeminiCompatible() — a test holds every tool schema to that subset.
+  amount: z.number().min(0).default(1),
   from: CurrencyCodeSchema,
   to: CurrencyCodeSchema,
 });

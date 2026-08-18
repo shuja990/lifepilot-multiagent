@@ -3,12 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "description": "Multi-agent personal planning assistant built on Google ADK for TypeScript",
-  "workspaces": ["packages/*", "apps/*"],
-  "engines": { "node": ">=20" },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "tool": "npm run tool --workspace @lifepilot/api --"
+    "tool": "npm run tool --workspace @lifepilot/api --",
+    "agent": "npm run agent --workspace @lifepilot/api --"
   }
 }

@@ -16,6 +16,20 @@ export const repoRoot = path.resolve(here, '../../../..');
 
 loadDotenv({ path: path.join(repoRoot, '.env') });
 
+/**
+ * Gemini key aliasing.
+ *
+ * The TypeScript SDK reads GOOGLE_GENAI_API_KEY or GEMINI_API_KEY, while the
+ * Python ADK and most Google docs say GOOGLE_API_KEY. That mismatch fails at
+ * the first model call with an error that names neither variable the user set,
+ * so accept all three spellings and normalise here, once.
+ */
+for (const alias of ['GOOGLE_GENAI_API_KEY', 'GEMINI_API_KEY'] as const) {
+  if (!process.env[alias]?.trim() && process.env['GOOGLE_API_KEY']?.trim()) {
+    process.env[alias] = process.env['GOOGLE_API_KEY'];
+  }
+}
+
 /** Thrown when a tool is invoked without the key it needs. */
 export class MissingEnvError extends Error {
   constructor(public readonly variable: string) {
