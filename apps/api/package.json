@@ -10,15 +10,19 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "agent": "tsx src/run.ts",
     "approve": "tsx src/approve.ts",
-    "tick": "tsx src/tick.ts"
+    "tick": "tsx src/tick.ts",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts"
   },
   "dependencies": {
     "@google/adk": "1.6.0",
+    "@hono/node-server": "^2.1.1",
     "@lifepilot/shared": "*",
+    "@mikro-orm/postgresql": "^6.4.0",
     "dotenv": "^16.4.5",
-    "zod": "^4.2.1",
+    "hono": "^4.13.3",
     "pg": "^8.13.0",
-    "@mikro-orm/postgresql": "^6.4.0"
+    "zod": "^4.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
