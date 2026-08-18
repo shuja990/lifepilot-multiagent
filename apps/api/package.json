@@ -7,7 +7,7 @@
     "tool": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types tests/*.test.ts"
+    "test": "node --import tsx --test tests/tools.test.ts"
   },
   "dependencies": {
     "@google/adk": "1.6.0",

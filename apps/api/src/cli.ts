@@ -20,6 +20,7 @@ import { findProducts } from './tools/products.js';
 import { getPreferences, savePreference } from './tools/preferences.js';
 import { getWeather } from './tools/weather.js';
 import { webSearch } from './tools/search.js';
+import { toToolError } from './lib/http.js';
 import type { ToolResult } from '@lifepilot/shared';
 
 type Runner = (args: string[]) => Promise<ToolResult<unknown>>;
@@ -84,7 +85,11 @@ function required(value: string | undefined, name: string): string {
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
 
-  if (!command || command === 'help' || !COMMANDS[command]) {
+  // Object.hasOwn, not truthiness: `COMMANDS['constructor']` is inherited from
+  // Object.prototype and would sail past an `in`/truthy guard.
+  const known = command ? Object.hasOwn(COMMANDS, command) : false;
+
+  if (!command || command === 'help' || !known) {
     if (command && command !== 'help') console.error(`Unknown tool: ${command}\n`);
     console.log('Usage: npm run tool -- <tool> [args]\n');
     for (const { usage } of Object.values(COMMANDS)) console.log(`  ${usage}`);
@@ -92,7 +97,14 @@ async function main(): Promise<void> {
   }
 
   const started = Date.now();
-  const result = await COMMANDS[command]!.run(args);
+  // Argument errors are thrown synchronously by required(), outside runTool, so
+  // normalise them here — otherwise CLI failures come in two different shapes.
+  let result: ToolResult<unknown>;
+  try {
+    result = await COMMANDS[command]!.run(args);
+  } catch (error) {
+    result = toToolError(error);
+  }
   const elapsed = Date.now() - started;
 
   if (result.ok) {
