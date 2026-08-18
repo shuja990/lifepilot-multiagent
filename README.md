@@ -47,6 +47,7 @@ npm install
 cp .env.example .env       # fill in the free keys — every link is in the file
 npm run build --workspace @lifepilot/shared
 npm run typecheck
+npm test
 ```
 
 ### Try the tools
@@ -99,6 +100,20 @@ schema, where a wrong number is at least attributable.
 **Tools never throw across the agent boundary.** Every tool returns
 `{ ok: true, data }` or `{ ok: false, error }`. An LLM recovers from an error
 object far better than a `ParallelAgent` branch recovers from an exception.
+
+**Nothing is substituted for missing data.** Where a provider returns null, the
+tool returns null. Open-Meteo omits temperatures for the last day of a 16-day
+window; an earlier version coalesced that to `0`, which reported 0 °C in
+Islamabad in September — a plausible number no downstream check could catch. A
+missing reading is now reported as missing and the agent decides what to do.
+
+### Tests
+
+`npm test` runs regression tests for the tool layer. Each one exists because a
+review found a real defect, so a failure means a specific bug came back rather
+than "something changed" — concurrent preference writes, corrupt-store
+detection, error-field propagation across composed tools, and the nullable
+fields above.
 
 ---
 
