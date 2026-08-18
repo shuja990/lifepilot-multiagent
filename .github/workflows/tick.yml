@@ -1,0 +1,33 @@
+# Drives the reminder scheduler, and wakes the API as a side effect.
+#
+# Free-tier hosts sleep after a period of inactivity, so an in-process timer
+# would not fire late — it would not fire at all. An external ping solves both
+# problems with one mechanism.
+#
+# GitHub's cron is best-effort and can lag by minutes, which is fine: /tick
+# drains everything due rather than assuming it ran on time.
+name: tick
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # so it can be triggered by hand while demoing
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drain due reminders
+        run: |
+          code=$(curl -sS -o /tmp/out.json -w "%{http_code}" \
+            -X POST "$API_URL/tick" \
+            -H "Authorization: Bearer $TICK_SECRET" \
+            --max-time 120 --retry 2 --retry-delay 20)
+          echo "status: $code"
+          cat /tmp/out.json || true
+          # A sleeping host answers slowly rather than wrongly; only a real
+          # failure should fail the run.
+          if [ "$code" != "200" ]; then exit 1; fi
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          TICK_SECRET: ${{ secrets.TICK_SECRET }}

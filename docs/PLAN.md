@@ -3,15 +3,13 @@
 Multi-agent personal planning assistant on Google ADK for TypeScript (`@google/adk`).
 Portfolio project, optimised for **near-zero running cost** and **maximum visible sophistication**.
 
-Status: **Phases 0–4 complete**, verified against live APIs. Phases 5–8 outstanding.
+Status: **Phases 0–7 complete**, verified against live APIs. Phase 8 outstanding
+(prompt-cache measurement and the final write-up).
 
-Phase 4 was pulled forward: Phase 3's graph could not run without failover,
-because a free-tier model being briefly unavailable stops the whole pipeline at
-its first agent.
-**Stack is TypeScript end-to-end — no Python anywhere.**
-
-Start at §6 Phase 0. Everything before it is the reasoning behind the decisions;
-everything after it is what to watch out for.
+Two phases moved from their planned order, both because reality demanded it:
+Phase 4 (routing) was pulled forward because Phase 3's graph could not run
+without failover, and an LLM orchestrator was added above the pipeline after the
+fixed SequentialAgent root turned out to make every request pay for every stage.
 
 ---
 
