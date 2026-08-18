@@ -5,13 +5,31 @@
  * bug. Routing policy lands here too (Phase 4), so the answer to "which model
  * ran this?" is always one file.
  */
+import { LLMRegistry } from '@google/adk';
+import { OpenAICompatibleLlm } from '../models/openai-compatible.js';
 import { envFlag, optionalEnv } from './env.js';
+
+/**
+ * Register the OpenAI-compatible adapter once, at import.
+ *
+ * After this, any agent can take `model: 'groq/openai/gpt-oss-120b'` as a
+ * plain string and ADK resolves it through our BaseLlm implementation — the
+ * same ergonomics Gemini gets natively.
+ */
+LLMRegistry.register(OpenAICompatibleLlm);
 
 export const MODELS = {
   /** Every agent's default. Free tier, good function calling. */
   default: optionalEnv('GEMINI_MODEL_DEFAULT', 'gemini-flash-latest'),
   /** High-volume, low-judgement work: extraction, classification. */
   fast: optionalEnv('GEMINI_MODEL_FAST', 'gemini-flash-lite-latest'),
+  /**
+   * Non-Gemini tiers. Empty keys make these inert rather than broken: the
+   * adapter reports a missing key as a response, so a run degrades instead of
+   * crashing and Phase 4 routing can fail over.
+   */
+  groq: optionalEnv('GROQ_MODEL', 'groq/openai/gpt-oss-120b'),
+  deepseek: optionalEnv('DEEPSEEK_MODEL', 'deepseek/deepseek-chat'),
 } as const;
 
 /**

@@ -40,10 +40,14 @@ them, and a clear note of anything you could not confirm. Be specific and brief;
 no filler, no restating the request back to the user.
 `.trim();
 
-export function createBaselineAgent(): LlmAgent {
+/**
+ * @param model Optional override so the identical agent can be run on any
+ * provider. This is the Phase 2 gate: same graph, same tools, different LLM.
+ */
+export function createBaselineAgent(model: string = MODELS.default): LlmAgent {
   return new LlmAgent({
     name: 'lifepilot_baseline',
-    model: MODELS.default,
+    model,
     description: 'Single-agent baseline that plans a real-world goal end to end.',
     instruction: BASELINE_INSTRUCTION,
     tools: ALL_TOOLS,

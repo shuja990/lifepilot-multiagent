@@ -25,16 +25,26 @@ async function main(): Promise<void> {
     argv.splice(userFlag, 2);
   }
 
+  // --model runs the identical agent on another provider: the Phase 2 gate.
+  let model: string | undefined;
+  const modelFlag = argv.indexOf('--model');
+  if (modelFlag !== -1) {
+    model = argv[modelFlag + 1];
+    argv.splice(modelFlag, 2);
+  }
+
   const prompt = argv.join(' ').trim();
   if (!prompt) {
-    console.error('Usage: npm run agent -- [--user <id>] "<your goal>"');
+    console.error('Usage: npm run agent -- [--user <id>] [--model <provider/model>] "<your goal>"');
     process.exit(1);
   }
 
-  // Fail fast and legibly rather than deep inside the SDK.
-  requireEnv('GOOGLE_API_KEY');
+  // Only Gemini needs this; other providers carry their own key check.
+  if (!model) requireEnv('GOOGLE_API_KEY');
 
-  const runner = new InMemoryRunner({ agent: createBaselineAgent(), appName: APP_NAME });
+  const agent = createBaselineAgent(model);
+  console.log(`model: ${agent.model as string}`);
+  const runner = new InMemoryRunner({ agent, appName: APP_NAME });
   const session = await runner.sessionService.createSession({ appName: APP_NAME, userId });
 
   console.log(`\n> ${prompt}\n`);
