@@ -9,7 +9,7 @@
  * layer can be developed and tested with no database at all; Phase 5 swaps in
  * a Postgres implementation without touching the tool surface.
  */
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { runTool } from '../lib/http.js';
 import { dataDir } from '../config/env.js';
@@ -29,19 +29,48 @@ export interface PreferenceStore {
   put(userId: string, preference: Preference): Promise<void>;
 }
 
-/** Development store. Not concurrency-safe — replaced by Postgres in Phase 5. */
+/**
+ * Development store. Replaced by Postgres in Phase 5.
+ *
+ * Two properties this needs even as a dev store, because the research fan-out
+ * is a ParallelAgent and concurrent writes are the normal case, not the edge:
+ *
+ *  1. Writes are serialised through an in-process promise chain. A plain
+ *     read-modify-write loses every update but one when calls interleave.
+ *  2. Writes are atomic (temp file + rename). Truncate-then-write leaves a
+ *     structurally invalid JSON file if the process dies mid-write, and a
+ *     blanket parse-catch would then report that corruption as "no
+ *     preferences" — silent total data loss dressed up as a successful read.
+ */
 export class JsonFilePreferenceStore implements PreferenceStore {
   private readonly file: string;
+  /** Serialises writes within this process. */
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(file = path.join(dataDir, 'preferences.json')) {
     this.file = file;
   }
 
   private async readAll(): Promise<Record<string, Preference[]>> {
+    let raw: string;
     try {
-      return JSON.parse(await readFile(this.file, 'utf8')) as Record<string, Preference[]>;
+      raw = await readFile(this.file, 'utf8');
+    } catch (error) {
+      // A store that does not exist yet is genuinely empty. Anything else
+      // (permissions, I/O) must surface rather than masquerade as empty.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      throw error;
+    }
+
+    try {
+      return JSON.parse(raw) as Record<string, Preference[]>;
     } catch {
-      return {};
+      // Refuse to proceed: returning {} here would let the next write persist
+      // an empty store and make the loss permanent.
+      throw new Error(
+        `Preference store at ${this.file} is not valid JSON. Refusing to overwrite it — ` +
+          'inspect or delete the file to continue.',
+      );
     }
   }
 
@@ -51,12 +80,28 @@ export class JsonFilePreferenceStore implements PreferenceStore {
   }
 
   async put(userId: string, preference: Preference): Promise<void> {
+    // Chain onto the queue so concurrent puts apply one at a time. Errors are
+    // isolated so one failed write does not poison every later write.
+    const run = this.queue.then(
+      () => this.putUnsafe(userId, preference),
+      () => this.putUnsafe(userId, preference),
+    );
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async putUnsafe(userId: string, preference: Preference): Promise<void> {
     const all = await this.readAll();
     const existing = all[userId] ?? [];
     // One value per key: a preference is current state, not an event log.
     all[userId] = [...existing.filter((p) => p.key !== preference.key), preference];
+
     await mkdir(path.dirname(this.file), { recursive: true });
-    await writeFile(this.file, JSON.stringify(all, null, 2), 'utf8');
+    // Write-then-rename: rename is atomic on the same filesystem, so a reader
+    // sees either the old file or the new one, never a half-written one.
+    const temp = `${this.file}.${process.pid}.tmp`;
+    await writeFile(temp, JSON.stringify(all, null, 2), 'utf8');
+    await rename(temp, this.file);
   }
 }
 
