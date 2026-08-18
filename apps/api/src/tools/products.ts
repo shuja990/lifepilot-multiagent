@@ -8,7 +8,7 @@
  * PriceResearch agent extracts prices in a later phase, against the shared
  * ProductCandidate schema, where a wrong number is at least attributable.
  */
-import { runTool } from '../lib/http.js';
+import { ToolFailure, runTool } from '../lib/http.js';
 import { webSearch } from './search.js';
 import {
   ProductsInputSchema,
@@ -50,7 +50,9 @@ export async function findProducts(
       depth: 'basic',
       includeDomains: RETAIL_DOMAINS,
     });
-    if (!result.ok) throw new Error(result.error);
+    // Preserve missingEnv/retryable so `products` reports a missing TAVILY_API_KEY
+    // with the same actionable hint that `search` does.
+    if (!result.ok) throw new ToolFailure(result);
 
     const candidates = result.data.hits.map((hit) => ({
       title: hit.title,

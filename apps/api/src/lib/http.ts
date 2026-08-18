@@ -1,11 +1,11 @@
 /**
  * The single place any tool talks to the outside world.
  *
- * Centralised so that timeouts, retry classification, and latency measurement
- * are identical across every provider. Phase 0 of the plan asks for real
- * per-call latency numbers for the README; `lastTimingMs` on the result is how
- * we get them without instrumenting each tool separately.
+ * Centralised so that timeouts and retry classification are identical across
+ * every provider, and so that every failure shape is normalised in exactly one
+ * place before it reaches an agent.
  */
+import { ZodError } from 'zod';
 import { MissingEnvError } from '../config/env.js';
 import type { ToolError, ToolResult } from '@lifepilot/shared';
 
@@ -30,6 +30,21 @@ export class HttpError extends Error {
 /** Status codes where trying again later is reasonable. */
 function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+/**
+ * Carries an already-formed ToolError across a throw.
+ *
+ * Tools that compose other tools (places -> geocode, products -> search) must
+ * not flatten an inner failure into `new Error(result.error)`: that discards
+ * `missingEnv` and `retryable`, so a missing API key stops telling you which
+ * key, and a transient 429 starts looking permanent to a retry supervisor.
+ */
+export class ToolFailure extends Error {
+  constructor(public readonly toolError: ToolError) {
+    super(toolError.error);
+    this.name = 'ToolFailure';
+  }
 }
 
 export async function fetchJson<T>(url: string, options: FetchJsonOptions = {}): Promise<T> {
@@ -89,6 +104,18 @@ export async function runTool<T>(fn: () => Promise<T>): Promise<ToolResult<T>> {
 }
 
 export function toToolError(error: unknown): ToolError {
+  // Already normalised by an inner tool - pass it through with its fields intact.
+  if (error instanceof ToolFailure) return error.toolError;
+
+  if (error instanceof ZodError) {
+    // Zod's default message is a multi-line JSON dump. At an LLM boundary that
+    // is expensive and hard to act on, so collapse it to one line per issue.
+    const issues = error.issues
+      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('; ');
+    return { ok: false, error: `Invalid arguments - ${issues}`, retryable: false };
+  }
+
   if (error instanceof MissingEnvError) {
     return {
       ok: false,

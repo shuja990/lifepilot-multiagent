@@ -9,7 +9,7 @@
  * hidden: OSM has no ratings, reviews, or photos. Anything ranking-shaped must
  * be answered by the search tool, not invented from this data.
  */
-import { fetchJson, runTool } from '../lib/http.js';
+import { ToolFailure, fetchJson, runTool } from '../lib/http.js';
 import { requireEnv } from '../config/env.js';
 import {
   GeocodeInputSchema,
@@ -100,20 +100,27 @@ export async function findPlaces(rawInput: PlacesInput): Promise<ToolResult<Plac
 
     // Resolve the anchor first — Places needs coordinates, not a place name.
     const centerResult = await geocode({ query: input.near });
-    if (!centerResult.ok) throw new Error(centerResult.error);
+    // ToolFailure, not a bare Error: a Geoapify 429 on the geocode leg must stay
+    // retryable, and a missing key must keep naming itself.
+    if (!centerResult.ok) throw new ToolFailure(centerResult);
     const center = centerResult.data;
 
     const params = new URLSearchParams({
       categories: CATEGORY_MAP[input.category],
       filter: `circle:${center.coordinates.lon},${center.coordinates.lat},${input.radiusMeters}`,
       bias: `proximity:${center.coordinates.lon},${center.coordinates.lat}`,
-      limit: String(input.limit),
+      // Over-fetch: unnamed and coordinate-less OSM entries are dropped below,
+      // and the provider applies `limit` before we get to filter them.
+      limit: String(Math.min(input.limit * 2, 40)),
       apiKey,
     });
 
     const response = await fetchJson<GeoapifyResponse>(`${PLACES_URL}?${params}`);
 
     const places = (response.features ?? [])
+      // A feature without coordinates would fail schema validation for the whole
+      // batch; drop the single bad entry instead of losing every result.
+      .filter((feature) => typeof feature.properties?.lat === 'number' && typeof feature.properties?.lon === 'number')
       .map((feature) => {
         const p = feature.properties;
         return {
@@ -128,7 +135,8 @@ export async function findPlaces(rawInput: PlacesInput): Promise<ToolResult<Plac
         };
       })
       // OSM entries without a name are near-useless to a planner.
-      .filter((place) => place.name !== 'Unnamed place');
+      .filter((place) => place.name !== 'Unnamed place')
+      .slice(0, input.limit);
 
     return PlacesOutputSchema.parse({
       resolvedLocation: center.formatted,
