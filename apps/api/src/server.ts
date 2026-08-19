@@ -32,6 +32,7 @@ import {
   listPendingApprovals,
 } from './memory/approvals.js';
 import { getSessionService, isPersistent } from './memory/stores.js';
+import { AuthError, createGuest, getUser, login, register, verifyToken } from './memory/auth.js';
 import { listConversations, titleFrom, touchConversation, deleteConversation } from './memory/conversations.js';
 import { getPreferences, savePreference } from './tools/preferences.js';
 import { runTick } from './tick.js';
@@ -46,6 +47,48 @@ app.use('/*', cors());
 app.get('/health', (c) =>
   c.json({ ok: true, persistent: isPersistent(), app: APP_NAME }),
 );
+
+/* -------------------------------------------------------------------- auth */
+
+/**
+ * Resolves the caller from the Authorization header.
+ *
+ * Every user-scoped route goes through this. It replaces reading `userId` from
+ * a query string, which meant `?userId=someone-else` was enough to read another
+ * person's conversations — identity was a label, not a boundary.
+ */
+function requireUserId(c: { req: { header(name: string): string | undefined } }): string {
+  const header = c.req.header('authorization') ?? '';
+  const userId = verifyToken(header.replace(/^Bearer\s+/i, '').trim() || undefined);
+  if (!userId) throw new AuthError('Sign in to continue.', 401);
+  return userId;
+}
+
+app.onError((error, c) => {
+  if (error instanceof AuthError) return c.json({ error: error.message }, error.status as 401);
+  console.error(error);
+  return c.json({ error: error.message || 'Something went wrong.' }, 500);
+});
+
+app.post('/auth/register', async (c) => {
+  const body = await c.req.json<{ email?: string; password?: string; displayName?: string }>();
+  if (!body.email || !body.password) return c.json({ error: 'Email and password are required.' }, 400);
+  return c.json(await register(body.email, body.password, body.displayName));
+});
+
+app.post('/auth/login', async (c) => {
+  const body = await c.req.json<{ email?: string; password?: string }>();
+  if (!body.email || !body.password) return c.json({ error: 'Email and password are required.' }, 400);
+  return c.json(await login(body.email, body.password));
+});
+
+/** A real row, so a guest's data is scoped exactly like anyone else's. */
+app.post('/auth/guest', async (c) => c.json(await createGuest()));
+
+app.get('/auth/me', async (c) => {
+  const user = await getUser(requireUserId(c));
+  return user ? c.json({ user }) : c.json({ error: 'Account not found.' }, 404);
+});
 
 /* -------------------------------------------------------------------- chat */
 
@@ -105,7 +148,7 @@ app.post('/chat', async (c) => {
   const message = body.message?.trim();
   if (!message) return c.json({ error: 'message is required' }, 400);
 
-  const userId = body.userId?.trim() || 'demo-user';
+  const userId = requireUserId(c);
   const mode = body.mode ?? 'orchestrator';
 
   const sessionService = getSessionService();
@@ -155,11 +198,9 @@ app.post('/chat', async (c) => {
 
 /* ---------------------------------------------------------------- history */
 
-app.get('/sessions', async (c) => {
-  const userId = c.req.query('userId')?.trim();
-  if (!userId) return c.json({ error: 'userId is required' }, 400);
-  return c.json({ sessions: await listConversations(userId) });
-});
+app.get('/sessions', async (c) =>
+  c.json({ sessions: await listConversations(requireUserId(c)) }),
+);
 
 /**
  * Replays one conversation.
@@ -169,8 +210,7 @@ app.get('/sessions', async (c) => {
  * apart — a reopened conversation looks exactly like it did when it ran.
  */
 app.get('/sessions/:id', async (c) => {
-  const userId = c.req.query('userId')?.trim();
-  if (!userId) return c.json({ error: 'userId is required' }, 400);
+  const userId = requireUserId(c);
 
   const session = await getSessionService().getSession({
     appName: APP_NAME,
@@ -184,10 +224,7 @@ app.get('/sessions/:id', async (c) => {
 });
 
 app.delete('/sessions/:id', async (c) => {
-  const userId = c.req.query('userId')?.trim();
-  if (!userId) return c.json({ error: 'userId is required' }, 400);
-
-  await deleteConversation(c.req.param('id'), userId);
+  await deleteConversation(c.req.param('id'), requireUserId(c));
   // The ADK session is left in place: deleting the index entry removes it from
   // the sidebar, while the transcript stays recoverable by id.
   return c.json({ ok: true });
@@ -196,21 +233,17 @@ app.delete('/sessions/:id', async (c) => {
 /* ------------------------------------------------------------ preferences */
 
 app.get('/preferences', async (c) => {
-  const userId = c.req.query('userId')?.trim();
-  if (!userId) return c.json({ error: 'userId is required' }, 400);
-
-  const result = await getPreferences({ userId });
+  const result = await getPreferences({ userId: requireUserId(c) });
   return result.ok ? c.json(result.data) : c.json({ error: result.error }, 500);
 });
 
 app.post('/preferences', async (c) => {
-  const body = await c.req.json<{ userId?: string; key?: string; value?: string }>();
-  if (!body.userId || !body.key || !body.value) {
-    return c.json({ error: 'userId, key and value are required' }, 400);
-  }
+  const userId = requireUserId(c);
+  const body = await c.req.json<{ key?: string; value?: string }>();
+  if (!body.key || !body.value) return c.json({ error: 'key and value are required' }, 400);
 
   const result = await savePreference({
-    userId: body.userId,
+    userId,
     key: body.key as never,
     value: body.value,
   });
@@ -219,10 +252,9 @@ app.post('/preferences', async (c) => {
 
 /* --------------------------------------------------------------- approvals */
 
-app.get('/approvals', async (c) => {
-  const userId = c.req.query('userId');
-  return c.json({ approvals: await listPendingApprovals(userId) });
-});
+app.get('/approvals', async (c) =>
+  c.json({ approvals: await listPendingApprovals(requireUserId(c)) }),
+);
 
 /**
  * Records a decision and resumes the suspended run.
@@ -237,6 +269,11 @@ app.post('/approvals/:id', async (c) => {
   const status = body.status === 'rejected' ? 'rejected' : 'approved';
   const approval = await getApproval(approvalId);
   if (!approval) return c.json({ error: 'not found' }, 404);
+
+  // An approval authorises a real-world action, so it may only be decided by
+  // the person it was raised for. Without this check, knowing an id would be
+  // enough to approve someone else's spending.
+  if (approval.userId !== requireUserId(c)) return c.json({ error: 'not found' }, 404);
 
   const changed = await decideApproval(approvalId, status, body.reason);
   if (!changed) {

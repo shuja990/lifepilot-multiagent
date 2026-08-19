@@ -1,32 +1,26 @@
 'use client';
 
 /**
- * The app shell: identity, conversation history, transcript, approvals.
+ * The app shell.
  *
- * On identity — this deliberately does NOT put a login wall in front of the
- * product. The Phase 7 acceptance check is that a stranger with the link and
- * no account can complete a full plan including an approval; a sign-in screen
- * fails that outright, and it is the same reasoning that kept Google Calendar
- * off the critical path.
+ * Two things changed the character of this screen:
  *
- * So identity is a claimed handle stored locally, not an authenticated account.
- * It is enough to keep conversations and preferences separate per person, and
- * it is honest about what it is: the UI says so rather than implying security
- * that is not there. Real auth belongs on the roadmap, not faked in the client.
+ * 1. Identity comes from a signed token now, not a string in localStorage, and
+ *    every request carries it. Before, `?userId=` was the only thing separating
+ *    one person's conversations from another's — a label, not a boundary.
+ *
+ * 2. The feed shows sentences, not events. `transfer_to_agent({"agentName":…})`
+ *    and raw argument JSON are the inside of the machine; a person wants to know
+ *    that it is checking the weather in Islamabad. The raw payload is one click
+ *    away for anyone who wants it.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AuthCard, type AuthedUser } from './components/AuthCard';
+import { Markdown } from './lib/markdown';
+import { toActivities, type Activity, type RawEntry } from './lib/activity';
 
 const API = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:8080';
-
-interface TraceEntry {
-  author: string;
-  kind: 'text' | 'tool-call' | 'tool-result' | 'error' | 'other' | 'user';
-  tool?: string;
-  args?: Record<string, unknown>;
-  text?: string;
-  ok?: boolean;
-  summary?: string;
-}
+const TOKEN_KEY = 'lifepilot.token';
 
 interface Conversation {
   sessionId: string;
@@ -48,9 +42,9 @@ interface Preference {
 }
 
 const EXAMPLES = [
-  'plan a weekend in Islamabad under 20000 PKR',
-  'what is 5000 PKR in USD?',
-  'help me buy noise cancelling headphones',
+  'Plan a weekend in Islamabad under 20000 PKR',
+  'What is 5000 PKR in USD?',
+  'Help me buy noise cancelling headphones',
 ];
 
 const PREFERENCE_KEYS = [
@@ -65,45 +59,97 @@ const PREFERENCE_KEYS = [
 ];
 
 export default function Page() {
-  const [userId, setUserId] = useState('');
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthedUser | null>(null);
+  const [booted, setBooted] = useState(false);
+
   const [message, setMessage] = useState('');
-  const [entries, setEntries] = useState<TraceEntry[]>([]);
+  const [entries, setEntries] = useState<RawEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [preferences, setPreferences] = useState<Preference[]>([]);
   const [showPrefs, setShowPrefs] = useState(false);
-  const [prefKey, setPrefKey] = useState(PREFERENCE_KEYS[0]);
+  const [prefKey, setPrefKey] = useState(PREFERENCE_KEYS[0]!);
   const [prefValue, setPrefValue] = useState('');
   const [reason, setReason] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const endRef = useRef<HTMLDivElement>(null);
 
-  /* Identity is restored before anything is fetched, so no request goes out
-     under the wrong user. */
+  /** Every authenticated call goes through here so the header cannot be forgotten. */
+  const authed = useCallback(
+    async (path: string, init: RequestInit = {}) => {
+      const res = await fetch(`${API}${path}`, {
+        ...init,
+        headers: {
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...(init.headers ?? {}),
+          authorization: `Bearer ${token ?? ''}`,
+        },
+      });
+      // An expired or revoked token means the session is over; drop it rather
+      // than leaving the UI half-working with 401s behind every panel.
+      if (res.status === 401) {
+        window.localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+        setUser(null);
+      }
+      return res;
+    },
+    [token],
+  );
+
+  /* Restore a saved session before rendering anything, so the sign-in card
+     does not flash for someone who is already signed in. */
   useEffect(() => {
-    const stored = window.localStorage.getItem('lifepilot.userId');
-    const id = stored ?? `guest-${Math.random().toString(36).slice(2, 8)}`;
-    if (!stored) window.localStorage.setItem('lifepilot.userId', id);
-    setUserId(id);
+    const stored = window.localStorage.getItem(TOKEN_KEY);
+    if (!stored) {
+      setBooted(true);
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(`${API}/auth/me`, {
+          headers: { authorization: `Bearer ${stored}` },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { user: AuthedUser };
+          setToken(stored);
+          setUser(data.user);
+        } else {
+          window.localStorage.removeItem(TOKEN_KEY);
+        }
+      } catch {
+        // Offline or API down — show the sign-in card rather than a blank page.
+      } finally {
+        setBooted(true);
+      }
+    })();
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!userId) return;
+    if (!token) return;
     try {
       const [sessionsRes, approvalsRes, prefsRes] = await Promise.all([
-        fetch(`${API}/sessions?userId=${encodeURIComponent(userId)}`),
-        fetch(`${API}/approvals?userId=${encodeURIComponent(userId)}`),
-        fetch(`${API}/preferences?userId=${encodeURIComponent(userId)}`),
+        authed('/sessions'),
+        authed('/approvals'),
+        authed('/preferences'),
       ]);
-      setConversations(((await sessionsRes.json()) as { sessions?: Conversation[] }).sessions ?? []);
-      setApprovals(((await approvalsRes.json()) as { approvals?: PendingApproval[] }).approvals ?? []);
-      setPreferences(((await prefsRes.json()) as { preferences?: Preference[] }).preferences ?? []);
+      if (sessionsRes.ok) {
+        setConversations(((await sessionsRes.json()) as { sessions?: Conversation[] }).sessions ?? []);
+      }
+      if (approvalsRes.ok) {
+        setApprovals(((await approvalsRes.json()) as { approvals?: PendingApproval[] }).approvals ?? []);
+      }
+      if (prefsRes.ok) {
+        setPreferences(((await prefsRes.json()) as { preferences?: Preference[] }).preferences ?? []);
+      }
     } catch {
-      // Sidebar data is secondary — a hiccup here must never interrupt a run.
+      // Sidebar data is secondary — a hiccup must never interrupt a run.
     }
-  }, [userId]);
+  }, [token, authed]);
 
   useEffect(() => {
     void refresh();
@@ -113,51 +159,43 @@ export default function Page() {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [entries, running]);
 
+  const activities = useMemo(() => toActivities(entries), [entries]);
+
+  const signOut = useCallback(() => {
+    window.localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setUser(null);
+    setEntries([]);
+    setSessionId(null);
+    setConversations([]);
+  }, []);
+
   const openConversation = useCallback(
     async (id: string) => {
       setMenuOpen(false);
       setSessionId(id);
       setEntries([]);
-      try {
-        const res = await fetch(
-          `${API}/sessions/${id}?userId=${encodeURIComponent(userId)}`,
-        );
-        const data = (await res.json()) as { entries?: TraceEntry[] };
-        setEntries(data.entries ?? []);
-      } catch {
-        setEntries([{ author: 'system', kind: 'error', summary: 'Could not load that conversation.' }]);
-      }
+      const res = await authed(`/sessions/${id}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { entries?: RawEntry[] };
+      setEntries(data.entries ?? []);
     },
-    [userId],
+    [authed],
   );
 
-  const newConversation = useCallback(() => {
-    setSessionId(null);
-    setEntries([]);
-    setMenuOpen(false);
-  }, []);
-
-  /**
-   * Streams a run.
-   *
-   * EventSource cannot POST and the run needs a JSON body, so the response is
-   * read as a stream by hand: split on blank lines, then read event/data.
-   */
   const send = useCallback(
     async (text: string) => {
       const prompt = text.trim();
-      if (!prompt || running || !userId) return;
+      if (!prompt || running || !token) return;
 
       setRunning(true);
       setMessage('');
-      // Appended, not replaced — the transcript is the history of this session.
-      setEntries((prev) => [...prev, { author: 'you', kind: 'user', text: prompt }]);
+      setEntries((prev) => [...prev, { author: 'user', kind: 'user', text: prompt }]);
 
       try {
-        const res = await fetch(`${API}/chat`, {
+        const res = await authed('/chat', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ message: prompt, userId, sessionId }),
+          body: JSON.stringify({ message: prompt, sessionId }),
         });
         if (!res.body) throw new Error('No response stream from the API.');
 
@@ -193,32 +231,35 @@ export default function Page() {
                 { author: 'system', kind: 'error', summary: (JSON.parse(data) as { error: string }).error },
               ]);
             } else {
-              setEntries((prev) => [...prev, JSON.parse(data) as TraceEntry]);
+              setEntries((prev) => [...prev, JSON.parse(data) as RawEntry]);
             }
           }
         }
       } catch (error) {
         setEntries((prev) => [
           ...prev,
-          { author: 'system', kind: 'error', summary: error instanceof Error ? error.message : String(error) },
+          {
+            author: 'system',
+            kind: 'error',
+            summary: error instanceof Error ? error.message : String(error),
+          },
         ]);
       } finally {
         setRunning(false);
         void refresh();
       }
     },
-    [running, sessionId, userId, refresh],
+    [running, sessionId, token, authed, refresh],
   );
 
   const decide = useCallback(
     async (approvalId: string, status: 'approved' | 'rejected') => {
-      // Removed immediately so the button cannot be pressed twice; the server
-      // also refuses a second decision, so this is only about the UI.
+      // Removed immediately so it cannot be pressed twice; the server also
+      // refuses a second decision, so this is purely about the UI.
       setApprovals((prev) => prev.filter((a) => a.approvalId !== approvalId));
       try {
-        const res = await fetch(`${API}/approvals/${approvalId}`, {
+        const res = await authed(`/approvals/${approvalId}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ status, reason: reason || undefined }),
         });
         const data = (await res.json()) as { answer?: string };
@@ -230,27 +271,44 @@ export default function Page() {
         void refresh();
       }
     },
-    [reason, refresh],
+    [reason, authed, refresh],
   );
 
-  const savePreference = useCallback(async () => {
+  const savePref = useCallback(async () => {
     if (!prefValue.trim()) return;
-    await fetch(`${API}/preferences`, {
+    await authed('/preferences', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ userId, key: prefKey, value: prefValue.trim() }),
+      body: JSON.stringify({ key: prefKey, value: prefValue.trim() }),
     });
     setPrefValue('');
     void refresh();
-  }, [prefKey, prefValue, userId, refresh]);
+  }, [prefKey, prefValue, authed, refresh]);
 
-  const changeIdentity = useCallback((next: string) => {
-    const id = next.trim() || 'guest';
-    window.localStorage.setItem('lifepilot.userId', id);
-    setUserId(id);
-    setSessionId(null);
-    setEntries([]);
+  const toggleRaw = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }, []);
+
+  if (!booted) return <div className="auth-shell" />;
+
+  if (!token || !user) {
+    return (
+      <AuthCard
+        api={API}
+        onAuthed={(nextUser, nextToken) => {
+          window.localStorage.setItem(TOKEN_KEY, nextToken);
+          setToken(nextToken);
+          setUser(nextUser);
+        }}
+      />
+    );
+  }
+
+  const activeTitle = conversations.find((c) => c.sessionId === sessionId)?.title;
 
   return (
     <div className="app">
@@ -260,12 +318,21 @@ export default function Page() {
           <strong>LifePilot</strong>
         </div>
 
-        <button type="button" onClick={newConversation}>New conversation</button>
+        <button
+          type="button"
+          onClick={() => {
+            setSessionId(null);
+            setEntries([]);
+            setMenuOpen(false);
+          }}
+        >
+          New conversation
+        </button>
 
         <div className="side-label">History</div>
         <div className="convo-list">
           {conversations.length === 0 && (
-            <div style={{ fontSize: '.8rem', color: 'var(--faint)', padding: '.25rem .5rem' }}>
+            <div style={{ fontSize: '.8rem', color: 'var(--faint)', padding: '.25rem .55rem' }}>
               Nothing yet.
             </div>
           )}
@@ -277,30 +344,23 @@ export default function Page() {
               onClick={() => void openConversation(conversation.sessionId)}
               title={conversation.title}
             >
-              <span>{conversation.title}</span>
+              {conversation.title}
             </button>
           ))}
         </div>
 
-        <div className="identity">
-          <div className="side-label" style={{ padding: 0 }}>Signed in as</div>
-          <input
-            defaultValue={userId}
-            onBlur={(e) => changeIdentity(e.target.value)}
-            aria-label="Your handle"
-            spellCheck={false}
-          />
-          <p className="hint">
-            A local handle, not an account — there is no password and nothing is
-            protected. It keeps your history and preferences separate so the demo
-            works without a sign-up.
-          </p>
+        <div className="account">
+          <div className="who">{user.displayName}</div>
+          <div className="sub">{user.isGuest ? 'Guest account' : user.email}</div>
+          <button type="button" className="ghost" onClick={signOut}>
+            Sign out
+          </button>
         </div>
       </aside>
 
       <main className="main">
         <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', minWidth: 0 }}>
             <button
               type="button"
               className="quiet menu-toggle"
@@ -309,18 +369,14 @@ export default function Page() {
             >
               ☰
             </button>
-            <div>
-              <h1>{conversations.find((c) => c.sessionId === sessionId)?.title ?? 'New conversation'}</h1>
-              <div className="sub">
-                {sessionId ? 'Saved — this survives a restart' : 'Nothing sent yet'}
-              </div>
+            <div style={{ minWidth: 0 }}>
+              <h1>{activeTitle ?? 'New conversation'}</h1>
+              <div className="sub">{sessionId ? 'Saved automatically' : 'Nothing sent yet'}</div>
             </div>
           </div>
-          <div className="right">
-            <button type="button" className="ghost" onClick={() => setShowPrefs((v) => !v)}>
-              Preferences{preferences.length > 0 ? ` (${preferences.length})` : ''}
-            </button>
-          </div>
+          <button type="button" className="ghost" onClick={() => setShowPrefs((v) => !v)}>
+            Preferences{preferences.length > 0 ? ` · ${preferences.length}` : ''}
+          </button>
         </div>
 
         <div className="thread">
@@ -329,14 +385,14 @@ export default function Page() {
               <section className="prefs">
                 <h3>What LifePilot remembers about you</h3>
                 {preferences.length === 0 ? (
-                  <p style={{ margin: '0 0 .6rem', color: 'var(--muted)', fontSize: '.85rem' }}>
+                  <p style={{ margin: '0 0 .7rem', color: 'var(--muted)', fontSize: '.85rem' }}>
                     Nothing saved yet. Agents only store what you actually tell them.
                   </p>
                 ) : (
                   <ul>
                     {preferences.map((preference) => (
                       <li key={preference.key}>
-                        <strong>{preference.key.replace(/_/g, ' ')}:</strong> {preference.value}
+                        {preference.key.replace(/_/g, ' ')}: <strong>{preference.value}</strong>
                       </li>
                     ))}
                   </ul>
@@ -353,7 +409,7 @@ export default function Page() {
                     placeholder="e.g. Lahore"
                     aria-label="Preference value"
                   />
-                  <button type="button" onClick={() => void savePreference()} disabled={!prefValue.trim()}>
+                  <button type="button" onClick={() => void savePref()} disabled={!prefValue.trim()}>
                     Save
                   </button>
                 </div>
@@ -362,13 +418,13 @@ export default function Page() {
 
             {approvals.map((approval) => (
               <section className="approval" key={approval.approvalId} aria-live="polite">
-                <h3>Approval needed — {approval.action.replace(/_/g, ' ')}</h3>
-                <div>{approval.summary}</div>
+                <div className="tag">Needs your approval</div>
+                <h3>{approval.summary}</h3>
                 <div className="details">{approval.details}</div>
-                <div style={{ fontSize: '.85rem' }}>
+                <div className="cost">
                   <strong>Cost:</strong> {approval.estimatedCost ?? 'none stated'}
                 </div>
-                <div className="row" style={{ marginTop: '.7rem' }}>
+                <div className="row">
                   <input
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
@@ -378,19 +434,23 @@ export default function Page() {
                   <button type="button" onClick={() => void decide(approval.approvalId, 'approved')}>
                     Approve
                   </button>
-                  <button type="button" className="ghost" onClick={() => void decide(approval.approvalId, 'rejected')}>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => void decide(approval.approvalId, 'rejected')}
+                  >
                     Reject
                   </button>
                 </div>
               </section>
             ))}
 
-            {entries.length === 0 && !running && (
+            {activities.length === 0 && !running && (
               <div className="empty">
                 <h2>What are you trying to do?</h2>
                 <p>
-                  Describe a real goal. Specialised agents research it, cost it and
-                  schedule it — and stop for your approval before anything real happens.
+                  Describe a real goal. Specialised agents research it, cost it and put it in
+                  order — and stop for your approval before anything real happens.
                 </p>
                 <div className="examples">
                   {EXAMPLES.map((example) => (
@@ -402,14 +462,12 @@ export default function Page() {
               </div>
             )}
 
-            {entries.map((entry, index) => (
-              <Entry key={index} entry={entry} />
-            ))}
+            <Feed activities={activities} expanded={expanded} onToggleRaw={toggleRaw} />
 
             {running && (
-              <div className="thinking">
+              <div className="working">
                 <span className="dot" aria-hidden="true" />
-                Agents are working…
+                Working…
               </div>
             )}
             <div ref={endRef} />
@@ -435,8 +493,8 @@ export default function Page() {
             </button>
           </form>
           <p className="note">
-            Booking and payment are simulated. Saving a plan, generating a calendar
-            file and scheduling reminders are real.
+            Booking and payment are simulated. Saving a plan, generating a calendar file and
+            scheduling reminders are real.
           </p>
         </div>
       </main>
@@ -444,45 +502,91 @@ export default function Page() {
   );
 }
 
-function Entry({ entry }: { entry: TraceEntry }) {
-  if (entry.kind === 'user') return <div className="bubble">{entry.text}</div>;
+/**
+ * Groups consecutive steps into one quiet block.
+ *
+ * A planning run emits a dozen of these; as separate cards they drown the
+ * answer, which is the thing the user actually came for.
+ */
+function Feed({
+  activities,
+  expanded,
+  onToggleRaw,
+}: {
+  activities: Activity[];
+  expanded: Set<string>;
+  onToggleRaw: (id: string) => void;
+}) {
+  const blocks: Array<{ kind: 'steps'; items: Activity[] } | { kind: 'one'; item: Activity }> = [];
 
-  if (entry.kind === 'text') {
-    return (
-      <article className="entry">
-        <div className="entry-head"><span className="badge">{entry.author}</span></div>
-        <div className="answer">{entry.text}</div>
-      </article>
-    );
+  for (const activity of activities) {
+    if (activity.type === 'step' || activity.type === 'handoff') {
+      const last = blocks[blocks.length - 1];
+      if (last && last.kind === 'steps') last.items.push(activity);
+      else blocks.push({ kind: 'steps', items: [activity] });
+    } else {
+      blocks.push({ kind: 'one', item: activity });
+    }
   }
 
-  if (entry.kind === 'error') {
-    return (
-      <article className="entry error">
-        <div className="entry-head">
-          <span className="badge">{entry.author}</span>
-          <span className="status-err">failed</span>
-        </div>
-        <div className="answer">{entry.summary}</div>
-      </article>
-    );
-  }
-
-  const isCall = entry.kind === 'tool-call';
   return (
-    <article className="entry">
-      <div className="entry-head">
-        <span className="badge">{entry.author}</span>
-        <span className="tool">{isCall ? '→' : '←'} {entry.tool}</span>
-        {!isCall && (
-          <span className={entry.ok ? 'status-ok' : 'status-err'}>
-            {entry.ok ? entry.summary : `failed — ${entry.summary ?? ''}`}
-          </span>
-        )}
-      </div>
-      {isCall && entry.args && Object.keys(entry.args).length > 0 && (
-        <pre className="args">{JSON.stringify(entry.args, null, 1)}</pre>
-      )}
-    </article>
+    <>
+      {blocks.map((block, index) => {
+        if (block.kind === 'steps') {
+          return (
+            <div className="steps" key={`s-${index}`}>
+              {block.items.map((step) => (
+                <div key={step.id}>
+                  <div
+                    className={`step${step.ok === false ? ' failed' : ''}${
+                      step.type === 'handoff' ? ' handoff' : ''
+                    }`}
+                  >
+                    <span className="icon" aria-hidden="true">
+                      {step.type === 'handoff' ? '⇢' : step.ok === false ? '×' : step.detail ? '✓' : '•'}
+                    </span>
+                    <span className="what">{step.label}</span>
+                    {step.detail && <span className="got">{step.detail}</span>}
+                    {step.raw != null && (
+                      <button
+                        type="button"
+                        className="quiet peek"
+                        onClick={() => onToggleRaw(step.id)}
+                        aria-expanded={expanded.has(step.id)}
+                      >
+                        {expanded.has(step.id) ? 'hide' : 'details'}
+                      </button>
+                    )}
+                  </div>
+                  {expanded.has(step.id) && (
+                    <pre className="raw">{JSON.stringify(step.raw, null, 2)}</pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          );
+        }
+
+        const item = block.item;
+
+        if (item.type === 'user') return <div className="you" key={item.id}>{item.text}</div>;
+
+        if (item.type === 'error') {
+          return (
+            <div className="failure" key={item.id}>
+              <div className="title">Something went wrong</div>
+              <div className="detail">{item.detail}</div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="answer" key={item.id}>
+            <div className="by">{item.agent}</div>
+            <Markdown>{item.text ?? ''}</Markdown>
+          </div>
+        );
+      })}
+    </>
   );
 }
