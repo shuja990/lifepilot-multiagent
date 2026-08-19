@@ -24,7 +24,8 @@ interface Props {
 }
 
 export function AuthCard({ api, onAuthed }: Props) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
+  const [notice, setNotice] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -40,7 +41,28 @@ export function AuthCard({ api, onAuthed }: Props) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body ?? {}),
       });
-      const data = (await res.json()) as { user?: AuthedUser; token?: string; error?: string };
+      const data = (await res.json()) as {
+        user?: AuthedUser;
+        token?: string;
+        error?: string;
+        message?: string;
+        emailConfigured?: boolean;
+      };
+
+      // The forgot flow returns a message rather than a session, and always the
+      // same one, so it cannot be used to discover which addresses exist.
+      if (path === '/auth/forgot') {
+        if (!res.ok) {
+          setError(data.error ?? 'That did not work.');
+          return;
+        }
+        setNotice(
+          data.emailConfigured === false
+            ? 'If that email has an account, a reset link was generated. No email provider is configured on this server, so the link was written to the server log.'
+            : (data.message ?? 'Check your email for a reset link.'),
+        );
+        return;
+      }
 
       if (!res.ok || !data.user || !data.token) {
         // The API returns readable messages ("Wrong email or password."), so
@@ -64,18 +86,31 @@ export function AuthCard({ api, onAuthed }: Props) {
           <strong>LifePilot</strong>
         </div>
 
-        <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+        <h1>
+          {mode === 'login'
+            ? 'Welcome back'
+            : mode === 'register'
+              ? 'Create your account'
+              : 'Reset your password'}
+        </h1>
         <p className="lede">
           {mode === 'login'
             ? 'Sign in to pick up your plans and preferences.'
-            : 'Your plans, preferences and approvals stay tied to your account.'}
+            : mode === 'register'
+              ? 'Your plans, preferences and approvals stay tied to your account.'
+              : 'Enter your email and we will send you a link to choose a new one.'}
         </p>
 
         {error && <div className="auth-error">{error}</div>}
+        {notice && <div className="auth-notice">{notice}</div>}
 
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            if (mode === 'forgot') {
+              void call('/auth/forgot', { email });
+              return;
+            }
             void call(mode === 'login' ? '/auth/login' : '/auth/register', {
               email,
               password,
@@ -109,6 +144,7 @@ export function AuthCard({ api, onAuthed }: Props) {
             />
           </div>
 
+          {mode !== 'forgot' && (
           <div className="field">
             <label htmlFor="password">Password</label>
             <input
@@ -121,24 +157,46 @@ export function AuthCard({ api, onAuthed }: Props) {
               placeholder={mode === 'register' ? 'At least 8 characters' : '••••••••'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             />
+            {mode === 'login' && (
+              <button
+                type="button"
+                className="link"
+                style={{ marginTop: '.45rem', fontSize: '.8rem' }}
+                onClick={() => {
+                  setMode('forgot');
+                  setError(null);
+                  setNotice(null);
+                }}
+              >
+                Forgot your password?
+              </button>
+            )}
           </div>
+          )}
 
           <button type="submit" disabled={busy}>
-            {busy ? 'Working…' : mode === 'login' ? 'Sign in' : 'Create account'}
+            {busy
+              ? 'Working…'
+              : mode === 'login'
+                ? 'Sign in'
+                : mode === 'register'
+                  ? 'Create account'
+                  : 'Send reset link'}
           </button>
         </form>
 
         <div style={{ marginTop: '.9rem', fontSize: '.85rem', color: 'var(--muted)' }}>
-          {mode === 'login' ? 'No account yet? ' : 'Already have one? '}
+          {mode === 'login' ? 'No account yet? ' : mode === 'register' ? 'Already have one? ' : ''}
           <button
             type="button"
             className="link"
             onClick={() => {
               setMode(mode === 'login' ? 'register' : 'login');
               setError(null);
+              setNotice(null);
             }}
           >
-            {mode === 'login' ? 'Create one' : 'Sign in'}
+            {mode === 'login' ? 'Create one' : 'Back to sign in'}
           </button>
         </div>
 

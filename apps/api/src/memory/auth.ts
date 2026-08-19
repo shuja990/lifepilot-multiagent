@@ -55,7 +55,19 @@ function init(): Promise<void> {
          created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
        )`,
     )
-    .then(() => undefined);
+    .then(() =>
+      getPool()
+        .query(
+          `CREATE TABLE IF NOT EXISTS password_resets (
+             token_hash TEXT PRIMARY KEY,
+             user_id    TEXT NOT NULL,
+             expires_at TIMESTAMPTZ NOT NULL,
+             used_at    TIMESTAMPTZ,
+             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+           )`,
+        )
+        .then(() => undefined),
+    );
   return ready;
 }
 
@@ -263,6 +275,97 @@ export async function getUser(id: string): Promise<User | undefined> {
   const result = await getPool().query<UserRow>('SELECT * FROM users WHERE id = $1', [id]);
   const row = result.rows[0];
   return row ? toUser(row) : undefined;
+}
+
+/* -------------------------------------------------------- password reset */
+
+const RESET_TTL_MINUTES = 60;
+
+/**
+ * Only the HASH of a reset token is stored.
+ *
+ * The table is as good as a password file otherwise: anyone who can read it
+ * could reset any account. Hashing means a database leak yields nothing usable,
+ * exactly as with the passwords themselves.
+ */
+function hashToken(token: string): string {
+  return createHmac('sha256', secret()).update(token).digest('hex');
+}
+
+export interface ResetRequest {
+  /** Undefined when no account matches — callers must not reveal which. */
+  token?: string;
+  email?: string;
+  displayName?: string;
+}
+
+/**
+ * Starts a reset.
+ *
+ * Returns quietly when the address is unknown. Saying "no such account" would
+ * turn this endpoint into a way to test which addresses are registered.
+ *
+ * Any earlier unused token for the account is invalidated, so a forwarded old
+ * email cannot be replayed after a newer request.
+ */
+export async function requestPasswordReset(email: string): Promise<ResetRequest> {
+  await init();
+
+  const normalised = email.trim().toLowerCase();
+  const result = await getPool().query<UserRow>(
+    'SELECT * FROM users WHERE email = $1 AND is_guest = false',
+    [normalised],
+  );
+  const row = result.rows[0];
+  if (!row) return {};
+
+  await getPool().query(
+    `UPDATE password_resets SET used_at = now()
+      WHERE user_id = $1 AND used_at IS NULL`,
+    [row.id],
+  );
+
+  const token = randomBytes(32).toString('hex');
+  await getPool().query(
+    `INSERT INTO password_resets (token_hash, user_id, expires_at)
+     VALUES ($1, $2, now() + ($3 || ' minutes')::interval)`,
+    [hashToken(token), row.id, String(RESET_TTL_MINUTES)],
+  );
+
+  return { token, email: row.email, displayName: row.display_name };
+}
+
+/**
+ * Completes a reset.
+ *
+ * The token must exist, be unused, and be unexpired — checked in one UPDATE so
+ * two simultaneous submissions cannot both succeed.
+ */
+export async function completePasswordReset(token: string, password: string): Promise<void> {
+  await init();
+
+  if (password.length < 8) {
+    throw new AuthError('Use at least 8 characters for your password.', 400);
+  }
+
+  const claimed = await getPool().query<{ user_id: string }>(
+    `UPDATE password_resets SET used_at = now()
+      WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+      RETURNING user_id`,
+    [hashToken(token)],
+  );
+
+  const userId = claimed.rows[0]?.user_id;
+  if (!userId) {
+    throw new AuthError('That reset link is invalid or has expired.', 400);
+  }
+
+  const salt = randomBytes(16).toString('hex');
+  const hash = await hashPassword(password, salt);
+  await getPool().query(
+    'UPDATE users SET password_hash = $2, password_salt = $3 WHERE id = $1',
+    [userId, hash, salt],
+  );
 }
 
 export async function closeAuthStore(): Promise<void> {

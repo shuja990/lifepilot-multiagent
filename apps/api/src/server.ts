@@ -32,7 +32,18 @@ import {
   listPendingApprovals,
 } from './memory/approvals.js';
 import { getSessionService, isPersistent } from './memory/stores.js';
-import { AuthError, createGuest, getUser, login, register, verifyToken } from './memory/auth.js';
+import {
+  AuthError,
+  completePasswordReset,
+  createGuest,
+  getUser,
+  login,
+  register,
+  requestPasswordReset,
+  verifyToken,
+} from './memory/auth.js';
+import { emailConfigured, sendMail } from './lib/email.js';
+import * as calendar from './integrations/google-calendar.js';
 import { listConversations, titleFrom, touchConversation, deleteConversation } from './memory/conversations.js';
 import { getPreferences, savePreference } from './tools/preferences.js';
 import { runTick } from './tick.js';
@@ -84,6 +95,64 @@ app.post('/auth/login', async (c) => {
 
 /** A real row, so a guest's data is scoped exactly like anyone else's. */
 app.post('/auth/guest', async (c) => c.json(await createGuest()));
+
+/**
+ * Starts a password reset.
+ *
+ * Always answers the same way, whether or not the address is registered — a
+ * different response for unknown addresses turns this into a way to discover
+ * which emails have accounts.
+ */
+app.post('/auth/forgot', async (c) => {
+  const body = await c.req.json<{ email?: string }>();
+  if (!body.email) return c.json({ error: 'Email is required.' }, 400);
+
+  const reset = await requestPasswordReset(body.email);
+
+  if (reset.token && reset.email) {
+    const base = optionalEnv('WEB_BASE_URL', 'http://localhost:3100');
+    const link = `${base}/reset?token=${reset.token}`;
+
+    try {
+      await sendMail({
+        to: reset.email,
+        subject: 'Reset your LifePilot password',
+        text: [
+          `Hi ${reset.displayName ?? 'there'},`,
+          '',
+          'Use this link to choose a new password. It expires in an hour and',
+          'can only be used once.',
+          '',
+          link,
+          '',
+          'If you did not ask for this, you can ignore this email — nothing has',
+          'changed on your account.',
+        ].join('\n'),
+      });
+    } catch (error) {
+      // Logged, not surfaced: telling the caller that delivery failed would
+      // also tell them the address exists.
+      console.error('Password reset email failed:', error);
+    }
+  }
+
+  return c.json({
+    ok: true,
+    message: 'If that email has an account, a reset link is on its way.',
+    // Not a secret, and it tells a self-hoster why no mail arrived.
+    emailConfigured: emailConfigured(),
+  });
+});
+
+app.post('/auth/reset', async (c) => {
+  const body = await c.req.json<{ token?: string; password?: string }>();
+  if (!body.token || !body.password) {
+    return c.json({ error: 'Token and new password are required.' }, 400);
+  }
+
+  await completePasswordReset(body.token, body.password);
+  return c.json({ ok: true, message: 'Password updated. You can sign in now.' });
+});
 
 app.get('/auth/me', async (c) => {
   const user = await getUser(requireUserId(c));
@@ -194,6 +263,61 @@ app.post('/chat', async (c) => {
       });
     }
   });
+});
+
+/* ------------------------------------------------------- connections */
+
+app.get('/connections', async (c) => {
+  const userId = requireUserId(c);
+  return c.json({
+    googleCalendar: {
+      // Distinguishes "the operator has not set this up" from "you have not
+      // connected yet", so the UI can explain rather than just disable a button.
+      available: calendar.isConfigured(),
+      connected: await calendar.isConnected(userId),
+    },
+  });
+});
+
+/**
+ * Starts the Google consent flow.
+ *
+ * The session token travels in `state` because the callback is a top-level
+ * browser redirect and cannot carry an Authorization header. Google returns
+ * `state` untouched, and it is verified on the way back.
+ */
+app.get('/connect/google', (c) => {
+  if (!calendar.isConfigured()) {
+    return c.json({ error: 'Google Calendar is not configured on this server.' }, 503);
+  }
+
+  const token = c.req.query('token') ?? '';
+  if (!verifyToken(token)) return c.json({ error: 'Sign in first.' }, 401);
+
+  return c.redirect(calendar.buildConsentUrl(token));
+});
+
+app.get('/connect/google/callback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  const userId = verifyToken(state ?? undefined);
+  const web = optionalEnv('WEB_BASE_URL', 'http://localhost:3100');
+
+  if (c.req.query('error')) return c.redirect(`${web}/?calendar=denied`);
+  if (!code || !userId) return c.redirect(`${web}/?calendar=failed`);
+
+  try {
+    await calendar.completeConnection(code, userId);
+    return c.redirect(`${web}/?calendar=connected`);
+  } catch (error) {
+    console.error('Google Calendar connection failed:', error);
+    return c.redirect(`${web}/?calendar=failed`);
+  }
+});
+
+app.delete('/connections/google', async (c) => {
+  await calendar.disconnect(requireUserId(c));
+  return c.json({ ok: true });
 });
 
 /* ---------------------------------------------------------------- history */

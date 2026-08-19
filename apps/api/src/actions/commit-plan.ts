@@ -21,6 +21,7 @@ import { CommitPlanInputSchema, CommitPlanOutputSchema } from '@lifepilot/shared
 import type { CommitPlanInput, CommitPlanOutput } from '@lifepilot/shared';
 import { dataDir, optionalEnv } from '../config/env.js';
 import { runOnce, savePlan, scheduleNotification } from '../memory/approvals.js';
+import { createEvents } from '../integrations/google-calendar.js';
 
 /** Short, URL-safe, and readable aloud — these end up in a shareable link. */
 function shortId(): string {
@@ -77,11 +78,27 @@ export async function commitPlan(
         scheduled += 1;
       }
 
+      // D — only when the user explicitly connected Google. Never throws: a
+      // calendar failure must not undo a plan that is already saved, so the
+      // count of what actually landed is reported instead.
+      const calendarResult = await createEvents(
+        input.userId,
+        input.milestones
+          .map((milestone, index) => ({
+            title: milestone.title,
+            startsAt: new Date(milestone.at),
+            description: milestone.note ?? null,
+            idempotencyId: `${planId}${index}`,
+          }))
+          .filter((event) => !Number.isNaN(event.startsAt.getTime())),
+      );
+
       return {
         planId,
         url: `${baseUrl}/plan/${planId}`,
         icsPath,
         scheduledNotifications: scheduled,
+        calendarEventsCreated: calendarResult.created,
       };
     },
   );

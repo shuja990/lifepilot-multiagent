@@ -75,7 +75,8 @@ agents and never the late pipeline agents that carry 12k of findings.
 | Multi-provider | A hand-written `BaseLlm` adapter — ADK-TS ships no non-Gemini models |
 | API | Node 22 · TypeScript strict · Hono · SSE |
 | Web | Next.js App Router, hand-written CSS |
-| Auth | scrypt password hashing + HMAC-signed tokens (`node:crypto`) |
+| Auth | scrypt hashing, HMAC tokens, single-use reset (`node:crypto`) |
+| Calendar | `.ics` by default; optional Google Calendar OAuth |
 | Data | Neon Postgres via ADK `DatabaseSessionService` |
 | Contracts | Zod schemas shared by API **and** web |
 
@@ -190,6 +191,12 @@ existing. The ping drives the schedule and wakes the host in one move.
 Set `API_URL` and `TICK_SECRET` as repository secrets. `/tick` fails closed: no
 secret configured, no execution.
 
+**The workflow never fails the job.** An earlier version exited non-zero whenever
+the API did not answer, so before deployment every scheduled run failed and
+GitHub emailed a failure notice every 15 minutes. A scheduler that spams you into
+disabling it has negative value, so problems are raised as run-log warnings and
+the job skips cleanly when the secrets are absent.
+
 ---
 
 ## Honest limitations
@@ -197,10 +204,17 @@ secret configured, no execution.
 Kept here deliberately. A portfolio project that hides its edges is a tutorial.
 
 - **Authentication is deliberately simple.** Real accounts with scrypt-hashed
-  passwords and HMAC-signed tokens, written against node:crypto rather than
-  pulled from a dependency — but there is no email verification, no password
-  reset and no rate limiting on sign-in. Those are the next things to add before
-  anyone should trust it with real data.
+  passwords, HMAC-signed tokens and single-use password reset, written against
+  node:crypto rather than pulled from a dependency — but there is no email
+  verification and no rate limiting on sign-in. Those are the next things to add
+  before anyone should trust it with real data.
+- **Password reset needs an email provider to be useful.** Set `RESEND_API_KEY`
+  (free tier, no card) or the reset link is written to the server log instead.
+  The link is never returned in the HTTP response — that would let anyone reset
+  any account.
+- **Google Calendar is opt-in and needs your own OAuth client.** Without
+  `GOOGLE_OAUTH_CLIENT_ID` the feature reports itself unavailable and plans still
+  produce a downloadable `.ics`, which needs no scope at all.
 - **Place data has no ratings, reviews or photos** — an OpenStreetMap
   consequence, surfaced to the agents rather than papered over, so ranking
   questions go to web search instead of being invented.

@@ -41,6 +41,10 @@ interface Preference {
   value: string;
 }
 
+interface Connections {
+  googleCalendar: { available: boolean; connected: boolean };
+}
+
 const EXAMPLES = [
   'Plan a weekend in Islamabad under 20000 PKR',
   'What is 5000 PKR in USD?',
@@ -71,10 +75,21 @@ export default function Page() {
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [preferences, setPreferences] = useState<Preference[]>([]);
   const [showPrefs, setShowPrefs] = useState(false);
+  const [connections, setConnections] = useState<Connections | null>(null);
+  const [calendarNotice, setCalendarNotice] = useState<string | null>(null);
   const [prefKey, setPrefKey] = useState(PREFERENCE_KEYS[0]!);
   const [prefValue, setPrefValue] = useState('');
   const [reason, setReason] = useState('');
-  const [menuOpen, setMenuOpen] = useState(false);
+  /**
+   * One piece of state drives both layouts.
+   *
+   * On desktop the sidebar is a grid column that collapses to zero width; on
+   * mobile it is an overlay drawer. Previously it could only be toggled on
+   * mobile and there was no way to close it at all on desktop.
+   *
+   * Default differs by viewport: open on a wide screen, closed on a phone.
+   */
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -100,6 +115,23 @@ export default function Page() {
     },
     [token],
   );
+
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 52rem)');
+    setSidebarOpen(!narrow.matches);
+
+    // Escape closes the drawer — expected wherever an overlay covers content.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && narrow.matches) setSidebarOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /** Closes the drawer after navigating, but only where it covers the content. */
+  const closeIfOverlay = useCallback(() => {
+    if (window.matchMedia('(max-width: 52rem)').matches) setSidebarOpen(false);
+  }, []);
 
   /* Restore a saved session before rendering anything, so the sign-in card
      does not flash for someone who is already signed in. */
@@ -132,11 +164,13 @@ export default function Page() {
   const refresh = useCallback(async () => {
     if (!token) return;
     try {
-      const [sessionsRes, approvalsRes, prefsRes] = await Promise.all([
+      const [sessionsRes, approvalsRes, prefsRes, connRes] = await Promise.all([
         authed('/sessions'),
         authed('/approvals'),
         authed('/preferences'),
+        authed('/connections'),
       ]);
+      if (connRes.ok) setConnections((await connRes.json()) as Connections);
       if (sessionsRes.ok) {
         setConversations(((await sessionsRes.json()) as { sessions?: Conversation[] }).sessions ?? []);
       }
@@ -155,6 +189,24 @@ export default function Page() {
     void refresh();
   }, [refresh]);
 
+  /* The OAuth callback returns here with ?calendar=..., since a redirect cannot
+     hand a result back to the page any other way. Read it, then strip it so a
+     refresh does not repeat the message. */
+  useEffect(() => {
+    const status = new URLSearchParams(window.location.search).get('calendar');
+    if (!status) return;
+
+    setCalendarNotice(
+      status === 'connected'
+        ? 'Google Calendar connected. Approved plans will now also create real calendar events.'
+        : status === 'denied'
+          ? 'Google Calendar was not connected — you declined the permission.'
+          : 'Could not connect Google Calendar. Check the server log for the reason.',
+    );
+    setShowPrefs(true);
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [entries, running]);
@@ -172,7 +224,7 @@ export default function Page() {
 
   const openConversation = useCallback(
     async (id: string) => {
-      setMenuOpen(false);
+      closeIfOverlay();
       setSessionId(id);
       setEntries([]);
       const res = await authed(`/sessions/${id}`);
@@ -180,7 +232,7 @@ export default function Page() {
       const data = (await res.json()) as { entries?: RawEntry[] };
       setEntries(data.entries ?? []);
     },
-    [authed],
+    [authed, closeIfOverlay],
   );
 
   const send = useCallback(
@@ -311,11 +363,33 @@ export default function Page() {
   const activeTitle = conversations.find((c) => c.sessionId === sessionId)?.title;
 
   return (
-    <div className="app">
-      <aside className={menuOpen ? 'sidebar open' : 'sidebar'}>
-        <div className="brand">
-          <span className="mark" aria-hidden="true">L</span>
-          <strong>LifePilot</strong>
+    <div className={sidebarOpen ? 'app' : 'app collapsed'}>
+      {/* Tapping the dimmed backdrop closes the drawer. Rendered always so the
+          CSS decides when it is visible, rather than duplicating the breakpoint
+          in JavaScript. */}
+      <button
+        type="button"
+        className="scrim"
+        aria-label="Close sidebar"
+        tabIndex={-1}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      <aside className="sidebar">
+        <div className="brand-row">
+          <div className="brand">
+            <span className="mark" aria-hidden="true">L</span>
+            <strong>LifePilot</strong>
+          </div>
+          <button
+            type="button"
+            className="quiet"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Hide sidebar"
+            title="Hide sidebar"
+          >
+            ⟨
+          </button>
         </div>
 
         <button
@@ -323,7 +397,7 @@ export default function Page() {
           onClick={() => {
             setSessionId(null);
             setEntries([]);
-            setMenuOpen(false);
+            closeIfOverlay();
           }}
         >
           New conversation
@@ -363,9 +437,11 @@ export default function Page() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', minWidth: 0 }}>
             <button
               type="button"
-              className="quiet menu-toggle"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-label="Toggle conversation list"
+              className="quiet"
+              onClick={() => setSidebarOpen((open) => !open)}
+              aria-label={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
+              aria-expanded={sidebarOpen}
+              title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
             >
               ☰
             </button>
@@ -381,6 +457,61 @@ export default function Page() {
 
         <div className="thread">
           <div className="thread-inner">
+            {showPrefs && connections && (
+              <section className="connections">
+                <h3>Google Calendar</h3>
+                <div className="sub">
+                  Optional. Plans always produce a downloadable calendar file; connecting
+                  Google also writes the milestones straight into your calendar.
+                </div>
+
+                {calendarNotice && <div className="auth-notice">{calendarNotice}</div>}
+
+                {!connections.googleCalendar.available ? (
+                  <div className="state">
+                    <span className="pill off">Unavailable</span>
+                    <span style={{ color: 'var(--muted)' }}>
+                      No Google OAuth client is configured on this server.
+                    </span>
+                  </div>
+                ) : connections.googleCalendar.connected ? (
+                  <>
+                    <div className="state">
+                      <span className="pill on">Connected</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={async () => {
+                        await authed('/connections/google', { method: 'DELETE' });
+                        setCalendarNotice('Google Calendar disconnected.');
+                        void refresh();
+                      }}
+                    >
+                      Disconnect
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="state">
+                      <span className="pill off">Not connected</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // A top-level navigation, not fetch: the consent screen
+                        // must be shown by the browser, and it cannot carry an
+                        // Authorization header, so the token rides in the URL.
+                        window.location.href = `${API}/connect/google?token=${encodeURIComponent(token)}`;
+                      }}
+                    >
+                      Connect Google Calendar
+                    </button>
+                  </>
+                )}
+              </section>
+            )}
+
             {showPrefs && (
               <section className="prefs">
                 <h3>What LifePilot remembers about you</h3>

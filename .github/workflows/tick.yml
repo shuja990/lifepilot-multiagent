@@ -1,33 +1,59 @@
-# # Drives the reminder scheduler, and wakes the API as a side effect.
-# #
-# # Free-tier hosts sleep after a period of inactivity, so an in-process timer
-# # would not fire late — it would not fire at all. An external ping solves both
-# # problems with one mechanism.
-# #
-# # GitHub's cron is best-effort and can lag by minutes, which is fine: /tick
-# # drains everything due rather than assuming it ran on time.
-# name: tick
+# Drives the reminder scheduler, and wakes the API as a side effect.
+#
+# Free-tier hosts sleep after a period of inactivity, so an in-process timer
+# would not fire late — it would not fire at all. An external ping solves both
+# problems with one mechanism.
+#
+# GitHub's cron is best-effort and can lag by minutes, which is fine: /tick
+# drains everything due rather than assuming it ran on time.
+#
+# IMPORTANT — this job does not fail on an unreachable API, and that is
+# deliberate. The first version exited non-zero whenever the API did not answer,
+# which meant that before the API was deployed every single scheduled run failed
+# and GitHub emailed a failure notice every 15 minutes. A scheduler that spams
+# you into disabling it has negative value. Problems are raised as warnings and
+# annotations, which show up in the run log without generating mail.
+name: tick
 
-# on:
-#   schedule:
-#     - cron: '*/15 * * * *'
-#   workflow_dispatch: # so it can be triggered by hand while demoing
+on:
+  schedule:
+    - cron: '0,30 * * * *' # twice an hour; /tick drains a backlog so this is ample
+  workflow_dispatch: # for demoing, and for testing the deployment by hand
 
-# jobs:
-#   tick:
-#     runs-on: ubuntu-latest
-#     steps:
-#       - name: Drain due reminders
-#         run: |
-#           code=$(curl -sS -o /tmp/out.json -w "%{http_code}" \
-#             -X POST "$API_URL/tick" \
-#             -H "Authorization: Bearer $TICK_SECRET" \
-#             --max-time 120 --retry 2 --retry-delay 20)
-#           echo "status: $code"
-#           cat /tmp/out.json || true
-#           # A sleeping host answers slowly rather than wrongly; only a real
-#           # failure should fail the run.
-#           if [ "$code" != "200" ]; then exit 1; fi
-#         env:
-#           API_URL: ${{ secrets.API_URL }}
-#           TICK_SECRET: ${{ secrets.TICK_SECRET }}
+# A slow tick must never pile up behind an even slower one.
+concurrency:
+  group: tick
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drain due reminders
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          TICK_SECRET: ${{ secrets.TICK_SECRET }}
+        run: |
+          # Not deployed yet is a normal state for this project, not an error.
+          if [ -z "$API_URL" ] || [ -z "$TICK_SECRET" ]; then
+            echo "::notice::API_URL or TICK_SECRET is not set — skipping. Add them in Settings → Secrets once the API is deployed."
+            exit 0
+          fi
+
+          code=$(curl -sS -o /tmp/out.json -w "%{http_code}" \
+            -X POST "$API_URL/tick" \
+            -H "Authorization: Bearer $TICK_SECRET" \
+            --max-time 120 --retry 2 --retry-delay 20 || echo "000")
+
+          echo "status: $code"
+          cat /tmp/out.json 2>/dev/null || true
+
+          case "$code" in
+            200) echo "::notice::Reminders drained." ;;
+            000) echo "::warning::Could not reach $API_URL — it may be asleep or not deployed." ;;
+            401) echo "::warning::TICK_SECRET does not match the deployed API." ;;
+            *)   echo "::warning::Unexpected status $code from /tick." ;;
+          esac
+
+          # Always succeed. See the note at the top of this file.
+          exit 0

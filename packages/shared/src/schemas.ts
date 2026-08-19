@@ -362,6 +362,8 @@ export const CommitPlanOutputSchema = z.object({
   /** Calendar file, so no OAuth scope is ever required. */
   icsPath: z.string().nullable(),
   scheduledNotifications: z.number().int().min(0),
+  /** 0 unless the user connected Google Calendar; the .ics is the default path. */
+  calendarEventsCreated: z.number().int().min(0).default(0),
   alreadyCommitted: z.boolean().describe('True when idempotency caught a repeat'),
 });
 export type CommitPlanOutput = z.infer<typeof CommitPlanOutputSchema>;
