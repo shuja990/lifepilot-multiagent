@@ -75,6 +75,7 @@ agents and never the late pipeline agents that carry 12k of findings.
 | Multi-provider | A hand-written `BaseLlm` adapter — ADK-TS ships no non-Gemini models |
 | API | Node 22 · TypeScript strict · Hono · SSE |
 | Web | Next.js App Router, hand-written CSS |
+| Auth | scrypt password hashing + HMAC-signed tokens (`node:crypto`) |
 | Data | Neon Postgres via ADK `DatabaseSessionService` |
 | Contracts | Zod schemas shared by API **and** web |
 
@@ -134,6 +135,12 @@ agent that forgets to ask still cannot act.
 **`packages/shared/src/schemas.ts`** — one set of Zod schemas feeding ADK's tool
 declarations *and* the web app, so the two cannot drift.
 
+**`apps/web/app/lib/activity.ts`** — the agent stream is engineering output:
+`transfer_to_agent`, argument objects, internal agent names. This turns it into
+sentences a person would want to read ("Checking the 3-day forecast for
+Islamabad"), folds results into the call that produced them, and keeps the raw
+payload one click away. Transparency is better served by this than by the JSON.
+
 ---
 
 ## Tool layer
@@ -189,9 +196,11 @@ secret configured, no execution.
 
 Kept here deliberately. A portfolio project that hides its edges is a tutorial.
 
-- **There is no authentication.** Identity is a handle in `localStorage` so a
-  stranger can use the demo without signing up, and the UI says so plainly. Real
-  auth is roadmap work, not something to fake in the client.
+- **Authentication is deliberately simple.** Real accounts with scrypt-hashed
+  passwords and HMAC-signed tokens, written against node:crypto rather than
+  pulled from a dependency — but there is no email verification, no password
+  reset and no rate limiting on sign-in. Those are the next things to add before
+  anyone should trust it with real data.
 - **Place data has no ratings, reviews or photos** — an OpenStreetMap
   consequence, surfaced to the agents rather than papered over, so ranking
   questions go to web search instead of being invented.
@@ -214,9 +223,9 @@ Kept here deliberately. A portfolio project that hides its edges is a tutorial.
 
 ## Screenshots
 
-| Desktop — live timeline | Mobile | History replay |
+| Sign in | Desktop | Mobile |
 |---|---|---|
-| ![](docs/screenshots/desktop-timeline.png) | ![](docs/screenshots/mobile-timeline.png) | ![](docs/screenshots/desktop-history.png) |
+| ![](docs/screenshots/sign-in.png) | ![](docs/screenshots/desktop-timeline.png) | ![](docs/screenshots/mobile-timeline.png) |
 
 ---
 
