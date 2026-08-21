@@ -5,8 +5,9 @@
   "scripts": {
     "dev": "next dev -p 3100",
     "build": "next build",
-    "start": "next start -p 3100",
-    "typecheck": "tsc --noEmit"
+    "start": "npx --yes serve out -l 3100",
+    "typecheck": "tsc --noEmit",
+    "preview": "npx --yes serve out -l 3100"
   },
   "dependencies": {
     "marked": "^18.0.10",

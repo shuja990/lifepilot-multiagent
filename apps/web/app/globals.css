@@ -138,10 +138,19 @@ a { color: var(--accent-text); }
 
 /* ----------------------------------------------------------------- layout */
 
+/*
+ * A fixed viewport with internal scrolling.
+ *
+ * With min-height the grid grew past the viewport, so the page scrolled rather
+ * than the thread — which meant the thread's scroll handler never fired and
+ * every new message dragged the reader back down. The composer also slid off
+ * the bottom of long conversations.
+ */
 .app {
   display: grid;
   grid-template-columns: var(--sidebar) 1fr;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
   transition: grid-template-columns .16s ease;
 }
 
@@ -193,7 +202,7 @@ a { color: var(--accent-text); }
 
 /* ------------------------------------------------------------------- main */
 
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
@@ -203,7 +212,9 @@ a { color: var(--accent-text); }
 .topbar h1 { font-size: .95rem; margin: 0; font-weight: 600; }
 .topbar .sub { font-size: .74rem; color: var(--faint); }
 
-.thread { flex: 1; overflow-y: auto; padding: 1.5rem 1.25rem; }
+/* min-height:0 lets a flex child actually shrink, which is what makes the
+   overflow scroll here instead of pushing the container taller. */
+.thread { flex: 1; min-height: 0; overflow-y: auto; padding: 1.5rem 1.25rem; }
 .thread-inner { max-width: 44rem; margin: 0 auto; display: flex; flex-direction: column; gap: .6rem; }
 
 .empty { text-align: center; padding: 3rem 1rem; }
@@ -326,4 +337,72 @@ a { color: var(--accent-text); }
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transition: none; }
   .dot { animation: none; opacity: .7; }
+}
+
+/* ------------------------------------------------------- composer textarea */
+
+/*
+ * The composer grows downward rather than scrolling sideways. A single-line
+ * input hides everything but the tail of a long prompt, which is exactly when
+ * the text most needs reading back.
+ */
+.composer textarea {
+  flex: 1;
+  resize: none;
+  min-height: 2.6rem;
+  max-height: 12.5rem;
+  overflow-y: auto;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+/* Keep the button anchored to the bottom as the box grows. */
+.composer form { align-items: flex-end; }
+
+/* Checkbox lists read better without the default bullet. */
+.md ul.tasks { list-style: none; padding-left: .35rem; }
+.md ul.tasks li { display: flex; align-items: baseline; gap: .45rem; }
+
+/* ------------------------------------------------------------ auth overlay */
+
+/*
+ * The sign-up appears over the planner rather than replacing it, so the goal
+ * they just typed stays visible behind the card.
+ */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: rgba(8, 12, 18, .55);
+  overflow-y: auto;
+}
+
+.pending-goal {
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  padding: .6rem .75rem;
+  margin-bottom: 1rem;
+  font-size: .88rem;
+}
+.pending-goal .label {
+  display: block;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--faint);
+  font-weight: 600;
+  margin-bottom: .2rem;
+}
+
+/* Sentence case, unlike the .label above it — this is a sentence, not a tag. */
+.pending-goal .follow-up {
+  display: block;
+  margin-top: .45rem;
+  font-size: .8rem;
+  color: var(--muted);
 }

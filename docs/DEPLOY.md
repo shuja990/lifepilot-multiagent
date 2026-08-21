@@ -148,7 +148,7 @@ address that owns the Resend account. To email anyone else, verify a domain at
 Walk the flow in a private window, so you hit the cold start a visitor would:
 
 1. Open the site. It loads immediately; the first request shows a waking notice.
-2. **Continue as guest.**
+2. Type a goal. The sign-up appears at that point; create an account.
 3. Ask something small: *"What is 250 USD in yen?"*
 4. Ask for a plan, then ask to save it. The approval card should appear and the
    run should stop until you decide.

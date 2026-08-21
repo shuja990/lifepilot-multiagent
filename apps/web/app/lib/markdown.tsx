@@ -44,10 +44,64 @@ function renderInline(tokens: Token[] | undefined, keyPrefix: string): ReactNode
           <span key={key}>{renderInline(link.tokens, key)}</span>
         );
       }
-      default:
+      default: {
+        const nested = (token as { tokens?: Token[] }).tokens;
+        if (nested && nested.length > 0) return <span key={key}>{renderInline(nested, key)}</span>;
         return <span key={key}>{(token as { text?: string }).text ?? ''}</span>;
+      }
     }
   });
+}
+
+/** Block-level tokens that can appear inside a list item. */
+const BLOCK_TYPES = new Set(['list', 'table', 'code', 'blockquote', 'hr', 'heading', 'space']);
+
+/**
+ * Renders one list item.
+ *
+ * Items are not plain inline content. A nested list, or a loose item with more
+ * than one paragraph, arrives as block tokens — and running those through the
+ * inline renderer flattened them into raw text, which is why sub-bullets showed
+ * up as literal dashes.
+ */
+function renderListItem(item: Tokens.ListItem, key: string): ReactNode {
+  const children = item.tokens ?? [];
+  const out: ReactNode[] = [];
+  let inlineRun: Token[] = [];
+
+  const flush = () => {
+    if (inlineRun.length === 0) return;
+    out.push(<span key={`${key}-i${out.length}`}>{renderInline(inlineRun, `${key}-i${out.length}`)}</span>);
+    inlineRun = [];
+  };
+
+  for (const child of children) {
+    if (BLOCK_TYPES.has(child.type)) {
+      flush();
+      out.push(renderBlock(child, `${key}-b${out.length}`));
+    } else if (child.type === 'paragraph') {
+      // A loose item: keep the paragraphs but do not force block spacing on a
+      // single-paragraph item, which is the common case.
+      flush();
+      out.push(
+        <span key={`${key}-p${out.length}`}>
+          {renderInline((child as Tokens.Paragraph).tokens, `${key}-p${out.length}`)}
+        </span>,
+      );
+    } else {
+      inlineRun.push(child);
+    }
+  }
+  flush();
+
+  return (
+    <li key={key}>
+      {item.task && (
+        <input type="checkbox" checked={Boolean(item.checked)} readOnly aria-hidden="true" />
+      )}
+      {out}
+    </li>
+  );
 }
 
 function renderBlock(token: Token, key: string): ReactNode {
@@ -65,10 +119,16 @@ function renderBlock(token: Token, key: string): ReactNode {
 
     case 'list': {
       const list = token as Tokens.List;
-      const items = list.items.map((item, index) => (
-        <li key={`${key}-${index}`}>{renderInline(item.tokens, `${key}-${index}`)}</li>
-      ));
-      return list.ordered ? <ol key={key}>{items}</ol> : <ul key={key}>{items}</ul>;
+      const items = list.items.map((item, index) => renderListItem(item, `${key}-${index}`));
+      return list.ordered ? (
+        <ol key={key} start={typeof list.start === 'number' ? list.start : undefined}>
+          {items}
+        </ol>
+      ) : (
+        <ul key={key} className={list.items.some((i) => i.task) ? 'tasks' : undefined}>
+          {items}
+        </ul>
+      );
     }
 
     case 'table': {

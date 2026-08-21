@@ -250,25 +250,15 @@ export async function login(
   return { user: toUser(row), token: issueToken(row.id) };
 }
 
-/**
- * Creates a throwaway account.
+/*
+ * Guest accounts were removed.
  *
- * The demo has to work for someone who will not sign up — that is an explicit
- * acceptance requirement — but a guest still needs a real row so their
- * conversations and preferences are scoped exactly like anyone else's.
+ * They let anyone create an unauthenticated row, which is a spam surface with
+ * no owner and no way to reach the person who made it. The planner is now
+ * visible without an account and only running a goal requires one.
+ *
+ * The is_guest column stays so existing rows keep working.
  */
-export async function createGuest(): Promise<{ user: User; token: string }> {
-  await init();
-
-  const id = randomUUID();
-  const result = await getPool().query<UserRow>(
-    `INSERT INTO users (id, email, display_name, password_hash, password_salt, is_guest)
-     VALUES ($1,$2,$3,'','',true) RETURNING *`,
-    [id, `guest-${id.slice(0, 8)}@local`, `Guest ${id.slice(0, 4)}`],
-  );
-  const row = result.rows[0]!;
-  return { user: toUser(row), token: issueToken(row.id) };
-}
 
 export async function getUser(id: string): Promise<User | undefined> {
   await init();

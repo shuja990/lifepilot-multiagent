@@ -198,6 +198,9 @@ by walking marked's token tree into React elements. Nothing passes through
 `dangerouslySetInnerHTML`, which matters because model output is ultimately
 shaped by whatever a web search returned.
 
-Identity comes from a signed token carried on every request. Guest sign-in
-creates a real account row, so a visitor who will not sign up still gets data
-scoped exactly like anyone else's.
+Identity comes from a signed token carried on every request.
+
+The planner itself is visible without an account — the sign-up is asked for at
+the point of running a goal, not at the door, and the typed goal is held and
+started automatically once the account exists. Showing the product before asking
+for an email is worth more than the handful of visitors who bounce at the form.

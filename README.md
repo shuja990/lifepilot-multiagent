@@ -173,6 +173,8 @@ static, so it loads instantly and shows a waking notice while the API returns.
 
 ## Limitations
 
+- An account is required to run a goal. The planner is visible without one, and
+  the typed goal is held and started once the account exists.
 - No email verification, and no rate limiting on sign-in.
 - Password reset needs `RESEND_API_KEY`; without it the link goes to the server
   log rather than an inbox.

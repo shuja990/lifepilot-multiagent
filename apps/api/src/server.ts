@@ -35,7 +35,6 @@ import { getSessionService, isPersistent } from './memory/stores.js';
 import {
   AuthError,
   completePasswordReset,
-  createGuest,
   getUser,
   login,
   register,
@@ -123,9 +122,6 @@ app.post('/auth/login', async (c) => {
   if (!body.email || !body.password) return c.json({ error: 'Email and password are required.' }, 400);
   return c.json(await login(body.email, body.password));
 });
-
-/** A real row, so a guest's data is scoped exactly like anyone else's. */
-app.post('/auth/guest', async (c) => c.json(await createGuest()));
 
 /**
  * Starts a password reset.

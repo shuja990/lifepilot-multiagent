@@ -107,7 +107,26 @@ export default function Page() {
    * that minute, which is exactly the first minute a visitor ever sees.
    */
   const [waking, setWaking] = useState(false);
+  /**
+   * The goal typed before signing up.
+   *
+   * The planner is visible to everyone; the account is asked for once there is
+   * something to run. Holding the prompt here means the sign-up is the last
+   * step of a task they started, and it runs automatically once they are in.
+   */
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  /**
+   * Whether to keep the view pinned to the newest output.
+   *
+   * Set false as soon as the reader scrolls up, so a long run cannot drag them
+   * back down while they are reading something earlier. Restored when they
+   * return to the bottom themselves.
+   */
+  const stickToBottom = useRef(true);
 
   /** Every authenticated call goes through here so the header cannot be forgotten. */
   const authed = useCallback(
@@ -224,8 +243,34 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (stickToBottom.current) {
+      endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
   }, [entries, running]);
+
+  /**
+   * Resize the composer to fit its content.
+   *
+   * Height is reset before measuring, because scrollHeight only ever grows
+   * otherwise and the box could never shrink back after deleting text.
+   */
+  const autoGrow = useCallback(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, []);
+
+  useEffect(() => {
+    autoGrow();
+  }, [message, autoGrow]);
+
+  /** A small tolerance, so "close enough to the bottom" still counts as pinned. */
+  const onThreadScroll = useCallback(() => {
+    const el = threadRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
 
   const activities = useMemo(() => toActivities(entries), [entries]);
 
@@ -243,6 +288,7 @@ export default function Page() {
       closeIfOverlay();
       setSessionId(id);
       setEntries([]);
+      stickToBottom.current = true;
       const res = await authed(`/sessions/${id}`);
       if (!res.ok) return;
       const data = (await res.json()) as { entries?: RawEntry[] };
@@ -252,9 +298,19 @@ export default function Page() {
   );
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, overrideToken?: string) => {
       const prompt = text.trim();
-      if (!prompt || running || !token) return;
+      if (!prompt || running) return;
+
+      // Everything above this line is free to look at; running it is what needs
+      // an account.
+      const activeToken = overrideToken ?? token;
+      if (!activeToken) {
+        setPendingPrompt(prompt);
+        setShowAuth(true);
+        setMessage('');
+        return;
+      }
 
       setRunning(true);
       setMessage('');
@@ -264,8 +320,12 @@ export default function Page() {
       setEntries((prev) => [...prev, { author: 'user', kind: 'user', text: prompt }]);
 
       try {
-        const res = await authed('/chat', {
+        const res = await fetch(`${API}/chat`, {
           method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${activeToken}`,
+          },
           body: JSON.stringify({ message: prompt, sessionId }),
         });
         if (!res.body) throw new Error('No response stream from the API.');
@@ -322,7 +382,7 @@ export default function Page() {
         void refresh();
       }
     },
-    [running, sessionId, token, authed, refresh],
+    [running, sessionId, token, refresh],
   );
 
   const decide = useCallback(
@@ -368,18 +428,20 @@ export default function Page() {
 
   if (!booted) return <div className="auth-shell" />;
 
-  if (!token || !user) {
-    return (
-      <AuthCard
-        api={API}
-        onAuthed={(nextUser, nextToken) => {
-          window.localStorage.setItem(TOKEN_KEY, nextToken);
-          setToken(nextToken);
-          setUser(nextUser);
-        }}
-      />
-    );
-  }
+  /** Signed in, and any prompt they left behind starts immediately. */
+  const onAuthed = (nextUser: AuthedUser, nextToken: string) => {
+    window.localStorage.setItem(TOKEN_KEY, nextToken);
+    setToken(nextToken);
+    setUser(nextUser);
+    setShowAuth(false);
+
+    const queued = pendingPrompt;
+    setPendingPrompt(null);
+    if (queued) {
+      // The token state has not landed yet, so pass it explicitly.
+      void send(queued, nextToken);
+    }
+  };
 
   const activeTitle = conversations.find((c) => c.sessionId === sessionId)?.title;
 
@@ -426,7 +488,12 @@ export default function Page() {
 
         <div className="side-label">History</div>
         <div className="convo-list">
-          {conversations.length === 0 && (
+          {!token && (
+            <div style={{ fontSize: '.8rem', color: 'var(--faint)', padding: '.25rem .55rem' }}>
+              Your plans appear here once you have an account.
+            </div>
+          )}
+          {token && conversations.length === 0 && (
             <div style={{ fontSize: '.8rem', color: 'var(--faint)', padding: '.25rem .55rem' }}>
               Nothing yet.
             </div>
@@ -445,11 +512,22 @@ export default function Page() {
         </div>
 
         <div className="account">
-          <div className="who">{user.displayName}</div>
-          <div className="sub">{user.isGuest ? 'Guest account' : user.email}</div>
-          <button type="button" className="ghost" onClick={signOut}>
-            Sign out
-          </button>
+          {user ? (
+            <>
+              <div className="who">{user.displayName}</div>
+              <div className="sub">{user.email}</div>
+              <button type="button" className="ghost" onClick={signOut}>
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="sub">Free — no card required.</div>
+              <button type="button" onClick={() => setShowAuth(true)}>
+                Sign in or sign up
+              </button>
+            </>
+          )}
         </div>
       </aside>
 
@@ -471,12 +549,14 @@ export default function Page() {
               <div className="sub">{sessionId ? 'Saved automatically' : 'Nothing sent yet'}</div>
             </div>
           </div>
-          <button type="button" className="ghost" onClick={() => setShowPrefs((v) => !v)}>
-            Preferences{preferences.length > 0 ? ` · ${preferences.length}` : ''}
-          </button>
+          {token && (
+            <button type="button" className="ghost" onClick={() => setShowPrefs((v) => !v)}>
+              Preferences{preferences.length > 0 ? ` · ${preferences.length}` : ''}
+            </button>
+          )}
         </div>
 
-        <div className="thread">
+        <div className="thread" ref={threadRef} onScroll={onThreadScroll}>
           <div className="thread-inner">
             {showPrefs && connections && (
               <section className="connections">
@@ -523,7 +603,7 @@ export default function Page() {
                         // A top-level navigation, not fetch: the consent screen
                         // must be shown by the browser, and it cannot carry an
                         // Authorization header, so the token rides in the URL.
-                        window.location.href = `${API}/connect/google?token=${encodeURIComponent(token)}`;
+                        window.location.href = `${API}/connect/google?token=${encodeURIComponent(token ?? '')}`;
                       }}
                     >
                       Connect Google Calendar
@@ -619,9 +699,7 @@ export default function Page() {
             {running && (
               <div className="working">
                 <span className="dot" aria-hidden="true" />
-                {waking
-                  ? 'Waking the server — free hosting sleeps when idle, so the first request can take a minute.'
-                  : 'Working…'}
+                {waking ? 'Still working…' : 'Working…'}
               </div>
             )}
             <div ref={endRef} />
@@ -635,11 +713,21 @@ export default function Page() {
               void send(message);
             }}
           >
-            <input
+            <textarea
+              ref={composerRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter sends; Shift+Enter adds a line. Matches what people
+                // expect from a chat box, and makes multi-line input possible.
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void send(message);
+                }
+              }}
               placeholder="Describe a goal…"
               aria-label="Your goal"
+              rows={1}
               disabled={running}
             />
             <button type="submit" disabled={running || !message.trim()}>
@@ -647,11 +735,26 @@ export default function Page() {
             </button>
           </form>
           <p className="note">
-            Booking and payment are simulated. Saving a plan, generating a calendar file and
-            scheduling reminders are real.
+            {token
+              ? 'Booking and payment are simulated. Saving a plan, generating a calendar file and scheduling reminders are real.'
+              : 'Type a goal to get started. Creating an account is free — no card, no payment.'}
           </p>
         </div>
       </main>
+
+      {showAuth && !token && (
+        <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="Sign in">
+          <AuthCard
+            api={API}
+            pendingPrompt={pendingPrompt}
+            onAuthed={onAuthed}
+            onDismiss={() => {
+              setShowAuth(false);
+              setPendingPrompt(null);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
