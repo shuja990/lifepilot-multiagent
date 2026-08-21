@@ -52,6 +52,31 @@ export async function sendMail(mail: Mail): Promise<{ delivered: boolean; via: s
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
+
+    // Resend's shared sender only delivers to the account owner's own address
+    // until a domain is verified. That is easy to hit and the raw 403 does not
+    // say what to do about it, so spell it out for whoever runs the server.
+    if (response.status === 403 && detail.includes('your own email address')) {
+      console.warn(
+        [
+          '',
+          'Resend refused this message.',
+          `  from: ${from}`,
+          `  to:   ${mail.to}`,
+          '',
+          'The shared onboarding@resend.dev sender can only deliver to the address',
+          'that owns the Resend account. To email anyone else, verify a domain at',
+          'https://resend.com/domains and set EMAIL_FROM to an address on it.',
+          '',
+          'Until then, the reset link is below so you can still test the flow:',
+          '',
+          mail.text,
+          '',
+        ].join('\n'),
+      );
+      return { delivered: false, via: 'resend-restricted' };
+    }
+
     // Thrown so the caller can decide; a silent failure here means a user waits
     // forever for a message that was never sent.
     throw new Error(`Email provider returned ${response.status}: ${detail.slice(0, 200)}`);
