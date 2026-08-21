@@ -99,6 +99,14 @@ export default function Page() {
    */
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /**
+   * True while a request is taking long enough that the API is probably asleep.
+   *
+   * Free hosting spins the service down after inactivity and the next request
+   * waits about a minute for it to wake. Without this the app looks broken for
+   * that minute, which is exactly the first minute a visitor ever sees.
+   */
+  const [waking, setWaking] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   /** Every authenticated call goes through here so the header cannot be forgotten. */
@@ -250,6 +258,9 @@ export default function Page() {
 
       setRunning(true);
       setMessage('');
+      // Three seconds is comfortably longer than a warm response and far
+      // shorter than a cold start, so it separates the two without guessing.
+      const wakeTimer = setTimeout(() => setWaking(true), 3000);
       setEntries((prev) => [...prev, { author: 'user', kind: 'user', text: prompt }]);
 
       try {
@@ -305,6 +316,8 @@ export default function Page() {
           },
         ]);
       } finally {
+        clearTimeout(wakeTimer);
+        setWaking(false);
         setRunning(false);
         void refresh();
       }
@@ -606,7 +619,9 @@ export default function Page() {
             {running && (
               <div className="working">
                 <span className="dot" aria-hidden="true" />
-                Working…
+                {waking
+                  ? 'Waking the server — free hosting sleeps when idle, so the first request can take a minute.'
+                  : 'Working…'}
               </div>
             )}
             <div ref={endRef} />

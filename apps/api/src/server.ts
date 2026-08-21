@@ -51,9 +51,40 @@ import { runTick } from './tick.js';
 const APP_NAME = 'lifepilot';
 const app = new Hono();
 
-// The web app is deployed on a different origin from the API, so CORS is a
-// requirement rather than a convenience.
-app.use('/*', cors());
+/**
+ * CORS, restricted to the origins we actually serve.
+ *
+ * The web app is on a different origin from the API, so CORS is a requirement
+ * rather than a convenience — but a wildcard is now the wrong default. With
+ * bearer-token auth, any page a signed-in user visits could otherwise call this
+ * API from their browser. Localhost stays allowed so development still works.
+ *
+ * ALLOWED_ORIGINS overrides the list for preview deployments.
+ */
+const allowedOrigins = [
+  optionalEnv('WEB_BASE_URL', 'http://localhost:3100'),
+  ...optionalEnv('ALLOWED_ORIGINS')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+  'http://localhost:3000',
+  'http://localhost:3100',
+];
+
+app.use(
+  '/*',
+  cors({
+    origin: (origin) => {
+      // Non-browser callers (curl, the cron) send no Origin at all.
+      if (!origin) return origin;
+      if (allowedOrigins.includes(origin)) return origin;
+      // Vercel preview deployments get a new hostname per push.
+      if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) return origin;
+      return null;
+    },
+    credentials: true,
+  }),
+);
 
 app.get('/health', (c) =>
   c.json({ ok: true, persistent: isPersistent(), app: APP_NAME }),

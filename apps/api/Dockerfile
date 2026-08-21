@@ -1,28 +1,57 @@
-# Hugging Face Spaces (Docker) runs this. Node rather than a Python base image,
-# since the whole stack is TypeScript.
-FROM node:22-slim
+# Build from the REPO ROOT, not this directory:
+#   docker build -f apps/api/Dockerfile .
+# The npm workspace layout means the lockfile and the shared package both live
+# above this file, so a narrower context cannot install correctly.
 
-# Spaces mounts a read-only filesystem apart from /tmp, so the app must never
-# write next to its own code. Everything durable already lives in Postgres.
-ENV NODE_ENV=production
+# ---------------------------------------------------------------- build stage
+FROM node:22-slim AS build
 WORKDIR /app
 
-# Copy manifests first so a dependency layer is cached across code changes.
+# Manifests first, so the dependency layer is cached across source-only changes.
+# All three workspace manifests are copied even though the web app is not built
+# here: npm reads every workspace to resolve the lockfile, and omitting one
+# makes `npm ci` fail with a lockfile-out-of-sync error.
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
 
-# The web workspace is not part of this image; --omit is not enough because npm
-# still resolves workspace links, so install from the root with what is present.
-RUN npm install --workspaces --include-workspace-root --omit=dev || npm install
+# Dev dependencies are required here — TypeScript compiles during this stage.
+RUN npm ci --workspace @lifepilot/shared --workspace @lifepilot/api --include-workspace-root
 
-COPY packages/shared ./packages/shared
-COPY apps/api ./apps/api
+COPY packages/shared packages/shared
+COPY apps/api apps/api
 
-RUN npm run build --workspace @lifepilot/shared
+# Compile to plain JavaScript rather than shipping tsx.
+#
+# An earlier version installed with --omit=dev and then ran `npx tsx`, which is
+# a devDependency — so the image built cleanly and then failed at boot with
+# "tsx not found". Compiling means the runtime image needs no TypeScript at all.
+RUN npm run build --workspace @lifepilot/shared \
+ && npm run build --workspace @lifepilot/api
 
-# Spaces expects 7860; PORT still wins so the same image runs anywhere.
-ENV PORT=7860
-EXPOSE 7860
+# -------------------------------------------------------------- runtime stage
+FROM node:22-slim AS runtime
+WORKDIR /app
 
-CMD ["npx", "tsx", "apps/api/src/server.ts"]
+ENV NODE_ENV=production
+
+# Production dependencies only. The compiled output needs no compiler.
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json packages/shared/
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+RUN npm ci --omit=dev --workspace @lifepilot/shared --workspace @lifepilot/api --include-workspace-root \
+ && npm cache clean --force
+
+COPY --from=build /app/packages/shared/dist packages/shared/dist
+COPY --from=build /app/apps/api/dist apps/api/dist
+
+# Render injects PORT; this default only matters when running the image locally.
+ENV PORT=10000
+EXPOSE 10000
+
+# Run as a non-root user. The base image ships `node` for exactly this.
+USER node
+
+CMD ["node", "apps/api/dist/server.js"]

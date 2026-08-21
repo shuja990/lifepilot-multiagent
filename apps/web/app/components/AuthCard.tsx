@@ -31,10 +31,13 @@ export function AuthCard({ api, onAuthed }: Props) {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Free hosting sleeps when idle; the first request can take about a minute. */
+  const [waking, setWaking] = useState(false);
 
   const call = async (path: string, body?: Record<string, unknown>) => {
     setBusy(true);
     setError(null);
+    const wakeTimer = setTimeout(() => setWaking(true), 3000);
     try {
       const res = await fetch(`${api}${path}`, {
         method: 'POST',
@@ -74,6 +77,8 @@ export function AuthCard({ api, onAuthed }: Props) {
     } catch {
       setError('Could not reach the server. Is the API running?');
     } finally {
+      clearTimeout(wakeTimer);
+      setWaking(false);
       setBusy(false);
     }
   };
@@ -103,6 +108,12 @@ export function AuthCard({ api, onAuthed }: Props) {
 
         {error && <div className="auth-error">{error}</div>}
         {notice && <div className="auth-notice">{notice}</div>}
+        {waking && (
+          <div className="auth-notice">
+            Waking the server — free hosting sleeps when idle, so this first request
+            can take about a minute.
+          </div>
+        )}
 
         <form
           onSubmit={(e) => {

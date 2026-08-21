@@ -80,6 +80,7 @@ agents and never the late pipeline agents that carry 12k of findings.
 | API | Node 22 · TypeScript strict · Hono · SSE |
 | Web | Next.js App Router, hand-written CSS |
 | Auth | scrypt hashing, HMAC tokens, single-use reset (`node:crypto`) |
+| Deploy | Render (API) · Vercel (web) · Neon (Postgres) |
 | Calendar | `.ics` by default; optional Google Calendar OAuth |
 | Data | Neon Postgres via ADK `DatabaseSessionService` |
 | Contracts | Zod schemas shared by API **and** web |
@@ -180,12 +181,23 @@ than a `ParallelAgent` branch recovers from an exception.
 
 ## Deployment
 
+Full walkthrough: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+
 | Piece | Host | Notes |
 |---|---|---|
-| API | HF Spaces (Docker) or Render | `apps/api/Dockerfile`; only `/tmp` is writable |
-| Web | Vercel | set `NEXT_PUBLIC_API_URL` to the API origin |
-| Database | Neon | free tier, scale-to-zero |
-| Scheduler | GitHub Actions | `.github/workflows/tick.yml`, every 15 min |
+| API | Render (Docker) | `render.yaml` blueprint; 750 instance-hours free |
+| Web | Vercel | root directory `apps/web`; set `NEXT_PUBLIC_API_URL` |
+| Database | Neon | free tier, scale-to-zero, no migrations to run |
+| Scheduler | GitHub Actions | `.github/workflows/tick.yml`, twice an hour |
+
+Hugging Face Spaces was the original plan; Docker Spaces moved to paid. Fly.io
+dropped its free tier and now wants a card. Render and Koyeb are what is left
+with a genuine free tier, and the Dockerfile runs on either.
+
+**The free tier sleeps.** Render spins a free service down after 15 minutes idle,
+so the first request after a quiet period waits about a minute. The web app shows
+a "waking the server" notice rather than looking broken, but plan for it when you
+send someone a link.
 
 The scheduler is an **external** cron on purpose. Free-tier hosts sleep, so an
 in-process timer would not fire late — it would not fire at all, and the

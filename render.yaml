@@ -1,0 +1,74 @@
+# Render blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploys the API only. The web app goes to Vercel, which is better at Next.js
+# and free for this size of project.
+#
+# Free plan realities worth knowing before you demo:
+#   - the service spins down after 15 minutes with no traffic, and the next
+#     request waits roughly a minute while it wakes
+#   - 750 instance-hours per month, which is about one always-on service
+#   - no credit card required
+#
+# The cold start is why the web app shows a waking state rather than hanging.
+
+services:
+  - type: web
+    name: lifepilot-api
+    runtime: docker
+    plan: free
+    region: frankfurt # closest to most demo traffic; oregon and singapore also exist
+    dockerfilePath: ./apps/api/Dockerfile
+    # The build context must be the repo root: the lockfile and the shared
+    # workspace both live above the Dockerfile.
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+
+    envVars:
+      # --- set these in the Render dashboard, never in this file ---
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: TICK_SECRET
+        sync: false
+      - key: GEOAPIFY_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_ID
+        sync: false
+      - key: GOOGLE_OAUTH_CLIENT_SECRET
+        sync: false
+
+      # --- safe to keep in version control ---
+      - key: NODE_ENV
+        value: production
+      - key: GOOGLE_GENAI_USE_VERTEXAI
+        value: 'FALSE'
+      # Pinned, never a -latest alias: those drift onto newer models whose free
+      # tier is a fraction of the size.
+      - key: GEMINI_MODEL_DEFAULT
+        value: gemini-3.6-flash
+      - key: GEMINI_MODEL_FAST
+        value: gemini-3.5-flash-lite
+      - key: PREMIUM_ENABLED
+        value: 'false'
+
+      # These three must match the deployed URLs, so they are set in the
+      # dashboard once the service and the Vercel project have real hostnames:
+      #   PUBLIC_BASE_URL           https://lifepilot-api.onrender.com
+      #   WEB_BASE_URL              https://<your-app>.vercel.app
+      #   GOOGLE_OAUTH_REDIRECT_URI https://lifepilot-api.onrender.com/connect/google/callback
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: WEB_BASE_URL
+        sync: false
+      - key: GOOGLE_OAUTH_REDIRECT_URI
+        sync: false
