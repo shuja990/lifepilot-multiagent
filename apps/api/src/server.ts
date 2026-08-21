@@ -523,6 +523,57 @@ app.post('/tick', async (c) => {
 
 /* ------------------------------------------------------------------- boot */
 
+/**
+ * Reports configuration problems at boot, in words.
+ *
+ * The model client used to be constructed during import, so a missing key threw
+ * an SDK error before the server bound a port — which on a hosted platform looks
+ * like a crash loop with a stack trace and no indication of which variable is
+ * wrong. Agents are built lazily now, so the server always starts; this says
+ * plainly what will not work until it is fixed.
+ */
+function reportConfiguration(): void {
+  const geminiKey =
+    optionalEnv('GOOGLE_API_KEY') ||
+    optionalEnv('GEMINI_API_KEY') ||
+    optionalEnv('GOOGLE_GENAI_API_KEY');
+
+  const problems: string[] = [];
+  if (!geminiKey) {
+    problems.push(
+      'GOOGLE_API_KEY is not set — every agent request will fail. Get a free key at https://aistudio.google.com/apikey',
+    );
+  }
+  if (!optionalEnv('DATABASE_URL')) {
+    problems.push(
+      'DATABASE_URL is not set — sessions and accounts are in memory and vanish on restart.',
+    );
+  }
+  if (!optionalEnv('AUTH_SECRET')) {
+    problems.push('AUTH_SECRET is not set — sign-in will fail. Generate one with: openssl rand -hex 32');
+  }
+
+  const optional: Array<[string, string]> = [
+    ['GEOAPIFY_API_KEY', 'place search'],
+    ['TAVILY_API_KEY', 'web and product search'],
+    ['TICK_SECRET', 'the reminder scheduler'],
+    ['RESEND_API_KEY', 'password-reset email'],
+  ];
+  const missingOptional = optional.filter(([key]) => !optionalEnv(key));
+
+  if (problems.length > 0) {
+    for (const problem of ['Configuration problems:', ...problems.map((p) => `  - ${p}`)]) {
+      console.warn(problem);
+    }
+  }
+  if (missingOptional.length > 0) {
+    const list = missingOptional.map(([key, what]) => `${what} (${key})`).join(', ');
+    console.warn(`Disabled features: ${list}`);
+  }
+}
+
+reportConfiguration();
+
 const port = Number(optionalEnv('PORT', '8080'));
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`LifePilot API on http://localhost:${info.port}`);
