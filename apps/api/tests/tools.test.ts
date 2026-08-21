@@ -133,7 +133,7 @@ test('currency accepts a null rate date rather than backfilling today', () => {
   const parsed = CurrencyOutputSchema.parse({
     amount: 1,
     from: 'USD',
-    to: 'PKR',
+    to: 'JPY',
     rate: 277.9,
     converted: 277.9,
     rateDate: null,
@@ -142,10 +142,10 @@ test('currency accepts a null rate date rather than backfilling today', () => {
 });
 
 test('product search does not advertise a currency parameter it cannot honour', () => {
-  const parsed = ProductsInputSchema.parse({ query: 'headphones', currency: 'PKR' });
+  const parsed = ProductsInputSchema.parse({ query: 'headphones', currency: 'JPY' });
   assert.ok(
     !('currency' in parsed),
-    'an accepted currency arg would let an agent report USD listings as PKR',
+    'an accepted currency arg would let an agent report USD listings as JPY',
   );
 });
 

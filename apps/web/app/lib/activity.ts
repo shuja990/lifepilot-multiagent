@@ -6,7 +6,7 @@
  * inside of the machine, not a report to the person using it.
  *
  * So each event becomes a plain sentence about what is happening ("Checking the
- * weather in Islamabad"), the raw payload stays available behind a toggle for
+ * weather in Lisbon"), the raw payload stays available behind a toggle for
  * anyone who wants it, and pure plumbing is dropped entirely.
  *
  * The transparency requirement is still met — arguably better. "Searching the
@@ -78,7 +78,7 @@ function num(value: unknown): string | undefined {
 /**
  * A sentence for a tool call, built from the arguments the model chose.
  *
- * The arguments are the interesting part — "Finding cafes near Islamabad" is
+ * The arguments are the interesting part — "Finding cafes near Lisbon" is
  * only useful because it names the category and the place.
  */
 function describeCall(tool: string, args: Record<string, unknown> = {}): string {

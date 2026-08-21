@@ -1,7 +1,7 @@
 /**
  * Run an agent from the terminal and watch what it does.
  *
- *   npm run agent -- "plan a weekend in Islamabad under 20000 PKR"
+ *   npm run agent -- "plan a weekend in Lisbon under 400 EUR"
  *   npm run agent -- --user shuja "help me buy noise cancelling headphones"
  *
  * Prints the live event stream (tool calls, arguments, results) followed by the

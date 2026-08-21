@@ -2,9 +2,9 @@
 
 A multi-agent personal planning assistant built on **Google ADK for TypeScript**.
 
-Describe a real goal in plain language — *"plan a weekend in Islamabad under
-20,000 PKR"*, *"help me buy noise-cancelling headphones"* — and an orchestrator
-routes it to the right specialists. They research it in parallel, cost it, put it
+Describe a real goal in plain language — *"plan a weekend in Lisbon under €400"*,
+*"help me buy noise-cancelling headphones"* — and an orchestrator routes it to
+the right specialists. They research it in parallel, cost it, put it
 in order, check each other's work, and then **stop and ask before doing anything
 consequential**.
 
@@ -24,6 +24,10 @@ Four things, live rather than described:
 2. **Real tools** — actual API calls returning real data, never stubs
 3. **Model routing** — one agent graph across several providers, with automatic failover
 4. **Human-in-the-loop** — a run that genuinely halts, then acts autonomously later
+
+It works **anywhere**: weather, places and currency come from worldwide sources
+(Open-Meteo, OpenStreetMap, 160+ currencies), so the same prompt works for Lisbon,
+Tokyo or Nairobi with no configuration.
 
 It also runs on **almost nothing**: every service has a free tier, and the
 deployed demo's happy path spends $0.
@@ -100,14 +104,14 @@ Every layer runs without the UI, which is how it was built and debugged.
 
 ```bash
 # individual tools — no agent, no LLM in the loop
-npm run tool -- weather Islamabad 3
-npm run tool -- places Islamabad cafe 3000 5
-npm run tool -- currency 20000 PKR USD
+npm run tool -- weather Lisbon 3
+npm run tool -- places Tokyo cafe 3000 5
+npm run tool -- currency 250 USD JPY
 
 # agents
-npm run agent -- "what is 5000 PKR in USD?"                 # orchestrator
-npm run agent -- --graph "plan a weekend in Islamabad"      # full pipeline
-npm run agent -- --baseline "plan a weekend in Islamabad"   # Phase 1 control
+npm run agent -- "what is 250 USD in yen?"                  # orchestrator
+npm run agent -- --graph "plan a weekend in Lisbon"         # full pipeline
+npm run agent -- --baseline "plan a weekend in Lisbon"      # Phase 1 control
 npm run agent -- --model groq/openai/gpt-oss-120b "..."     # another provider
 
 # the approval gate
@@ -161,8 +165,8 @@ Three rules the tool layer holds to:
 
 **Nothing is substituted for missing data.** Where a provider returns null, the
 tool returns null. An early version coalesced a missing temperature to `0` and
-reported 0 °C in Islamabad in September — a plausible number no downstream check
-could catch.
+reported 0 °C for a warm city in September — a plausible number no downstream
+check could catch.
 
 **No LLM runs inside a tool**, so no tool result can be invented. `products`
 returns listings with `priceApprox: null` rather than guessing a price from a
@@ -232,6 +236,9 @@ Kept here deliberately. A portfolio project that hides its edges is a tutorial.
   research than the single-agent baseline — 7 tool calls including three real
   place lookups, against 3 and none — but a clean end-to-end judgement is still
   pending. The baseline is kept in `docs/baselines/` so the claim stays testable.
+- **Place coverage varies by region.** OpenStreetMap is dense in cities and
+  thinner in rural areas, so results are better for Lisbon than for a village.
+  The agents are told this and fall back to web search rather than inventing.
 
 ---
 

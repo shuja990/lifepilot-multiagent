@@ -1,5 +1,10 @@
 # Baseline — Phase 1 single agent
 
+> The recorded run below used Islamabad simply because that is where the
+> developer was testing. Nothing in the system is region-specific — the same
+> comparison works for any city — but the numbers here are left exactly as they
+> were measured rather than re-run with a prettier destination.
+
 **This file is a control, not documentation.** docs/PLAN.md Phase 3 requires the
 multi-agent graph to beat this on the same prompt. Without a saved baseline that
 claim is unfalsifiable, and plenty of multi-agent systems are slower and worse

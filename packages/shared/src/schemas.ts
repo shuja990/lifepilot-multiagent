@@ -19,7 +19,7 @@ export const CoordinatesSchema = z.object({
 });
 export type Coordinates = z.infer<typeof CoordinatesSchema>;
 
-/** ISO-4217, e.g. "PKR". Uppercased on parse so callers can be sloppy. */
+/** ISO-4217, e.g. "EUR". Uppercased on parse so callers can be sloppy. */
 export const CurrencyCodeSchema = z
   .string()
   .trim()
@@ -51,7 +51,7 @@ export type ToolResult<T> = { ok: true; data: T } | ToolError;
 /* ----------------------------------------------------------------- weather */
 
 export const WeatherInputSchema = z.object({
-  location: z.string().min(2).describe('City or place name, e.g. "Islamabad"'),
+  location: z.string().min(2).describe('City or place name, anywhere in the world'),
   days: z.number().int().min(1).max(16).default(3).describe('Forecast days, 1-16'),
 });
 export type WeatherInput = z.input<typeof WeatherInputSchema>;
@@ -206,7 +206,7 @@ export const ProductsInputSchema = z.object({
   query: z.string().min(2).describe('What to buy, e.g. "noise cancelling headphones"'),
   maxResults: z.number().int().min(1).max(10).default(5),
   // No `currency` field: this tool cannot honour one. Advertising a parameter
-  // we ignore would let an agent pass currency:'PKR', receive USD listings, and
+  // we ignore would let an agent pass currency:'JPY', receive USD listings, and
   // reasonably report them as rupees.
 });
 export type ProductsInput = z.input<typeof ProductsInputSchema>;

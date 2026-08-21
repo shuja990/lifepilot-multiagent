@@ -6,12 +6,12 @@
  * agents do and you should never need an LLM in the loop to find out whether
  * an API call works.
  *
- *   npm run tool -- weather Islamabad 3
- *   npm run tool -- places Islamabad cafe
- *   npm run tool -- currency 20000 PKR USD
- *   npm run tool -- search "best time to visit Hunza"
+ *   npm run tool -- weather Lisbon 3
+ *   npm run tool -- places "Tokyo" cafe
+ *   npm run tool -- currency 250 USD JPY
+ *   npm run tool -- search "best time to visit Patagonia"
  *   npm run tool -- products "noise cancelling headphones"
- *   npm run tool -- prefs:set demo-user home_city Lahore
+ *   npm run tool -- prefs:set demo-user home_city Berlin
  *   npm run tool -- prefs:get demo-user
  */
 import { convertCurrency } from './tools/currency.js';

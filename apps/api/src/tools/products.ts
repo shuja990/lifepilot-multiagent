@@ -9,6 +9,7 @@
  * ProductCandidate schema, where a wrong number is at least attributable.
  */
 import { ToolFailure, runTool } from '../lib/http.js';
+import { optionalEnv } from '../config/env.js';
 import { webSearch } from './search.js';
 import {
   ProductsInputSchema,
@@ -19,19 +20,29 @@ import {
 } from '@lifepilot/shared';
 
 /**
- * Kept broad and international rather than US-only — the demo is run from
- * Pakistan and a US-only list returns unbuyable results.
+ * Spread across regions on purpose.
+ *
+ * A US-only list returns results most of the world cannot actually buy, and a
+ * single-market list quietly makes the whole product a single-market product.
+ * Override RETAIL_DOMAINS to bias toward one market.
  */
-const RETAIL_DOMAINS = [
+const DEFAULT_RETAIL_DOMAINS = [
   'amazon.com',
+  'amazon.co.uk',
+  'amazon.de',
   'ebay.com',
   'bestbuy.com',
   'walmart.com',
-  'daraz.pk',
   'aliexpress.com',
   'newegg.com',
   'argos.co.uk',
+  'mediamarkt.de',
 ];
+
+const RETAIL_DOMAINS = (optionalEnv('RETAIL_DOMAINS') || '')
+  .split(',')
+  .map((domain) => domain.trim())
+  .filter(Boolean);
 
 const DATA_NOTES =
   'Retrieval only: these are retail search results, not a structured product ' +
@@ -48,7 +59,7 @@ export async function findProducts(
       query: `${input.query} price buy`,
       maxResults: input.maxResults,
       depth: 'basic',
-      includeDomains: RETAIL_DOMAINS,
+      includeDomains: RETAIL_DOMAINS.length > 0 ? RETAIL_DOMAINS : DEFAULT_RETAIL_DOMAINS,
     });
     // Preserve missingEnv/retryable so `products` reports a missing TAVILY_API_KEY
     // with the same actionable hint that `search` does.

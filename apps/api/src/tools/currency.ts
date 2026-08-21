@@ -4,8 +4,8 @@
  *
  * PROVIDER NOTE (Phase 0 finding): the plan originally specified Frankfurter.
  * Frankfurter serves European Central Bank reference rates, which cover only
- * ~30 currencies and DO NOT include PKR — the home currency for this project's
- * demo. It returned a bare 404 for PKR, which would have surfaced as a broken
+ * ~30 currencies and exclude most of the world — PKR, the currency this was
+ * first tested with, returned a bare 404, which would have surfaced as a broken
  * BudgetAgent much later. Swapped here; the tool surface is unchanged, which is
  * the whole point of keeping providers behind a thin adapter (docs/PLAN.md §8).
  *

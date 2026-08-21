@@ -11,7 +11,7 @@
  *
  * 2. The feed shows sentences, not events. `transfer_to_agent({"agentName":…})`
  *    and raw argument JSON are the inside of the machine; a person wants to know
- *    that it is checking the weather in Islamabad. The raw payload is one click
+ *    that it is checking the weather in Lisbon. The raw payload is one click
  *    away for anyone who wants it.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -45,9 +45,17 @@ interface Connections {
   googleCalendar: { available: boolean; connected: boolean };
 }
 
+/**
+ * Deliberately spread across continents and goal types.
+ *
+ * The examples are the first thing anyone reads, so they double as a claim
+ * about reach: the tools are worldwide (Open-Meteo, OpenStreetMap, 160+
+ * currencies), and nothing about the system is tied to one country.
+ */
 const EXAMPLES = [
-  'Plan a weekend in Islamabad under 20000 PKR',
-  'What is 5000 PKR in USD?',
+  'Plan a weekend in Lisbon under €400',
+  'What is 250 USD in Japanese yen?',
+  'Find quiet cafes near Shibuya, Tokyo',
   'Help me buy noise cancelling headphones',
 ];
 
@@ -537,7 +545,7 @@ export default function Page() {
                   <input
                     value={prefValue}
                     onChange={(e) => setPrefValue(e.target.value)}
-                    placeholder="e.g. Lahore"
+                    placeholder="e.g. Berlin"
                     aria-label="Preference value"
                   />
                   <button type="button" onClick={() => void savePref()} disabled={!prefValue.trim()}>

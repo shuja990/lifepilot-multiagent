@@ -54,8 +54,9 @@ test suite to run, so verification was **live CLI execution against every real
 API**, which is the stronger check at this stage.
 
 > Phase 0 immediately justified the pipeline: running the tools for real found
-> that Frankfurter (ECB) does not carry PKR, the demo's home currency. A plan
-> review would never have caught that. See [PLAN.md §9](./PLAN.md).
+> that Frankfurter (ECB) carries only ~30 currencies, so most of the world had
+> no exchange rate at all. A plan review would never have caught that.
+> See [PLAN.md §9](./PLAN.md).
 
 ### Phase 1 — Single agent baseline
 `qa-verifier` to confirm the agent completes with ≥3 real tool calls. Save the

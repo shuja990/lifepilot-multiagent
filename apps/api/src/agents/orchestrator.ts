@@ -3,7 +3,7 @@
  *
  * Until now the root was a SequentialAgent: a fixed pipeline whose control flow
  * lived in TypeScript, so every request paid for every stage. "What is 5,000
- * PKR in USD?" ran intake, four parallel research agents, a three-stage
+ * USD in yen?" ran intake, four parallel research agents, a three-stage
  * planning pipeline and a verification loop to produce one number.
  *
  * The tell that this was wrong was in the prompts: price_research and
