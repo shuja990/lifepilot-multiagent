@@ -570,6 +570,29 @@ function reportConfiguration(): void {
     const list = missingOptional.map(([key, what]) => `${what} (${key})`).join(', ');
     console.warn(`Disabled features: ${list}`);
   }
+
+  /*
+   * Print the resolved URLs.
+   *
+   * Hosting platforms append a suffix when a service name is already taken, so
+   * the hostname you get is often not the one you planned for. Pointing one of
+   * these at the wrong service produces failures that look unrelated: the UI
+   * cannot reach the API, plan links 404, or Google redirects to a page that
+   * does not exist. Printing them makes a glance at the log enough to spot it.
+   */
+  const publicBase = optionalEnv('PUBLIC_BASE_URL', 'http://localhost:8080');
+  const webBase = optionalEnv('WEB_BASE_URL', 'http://localhost:3100');
+
+  console.log(`PUBLIC_BASE_URL (this API): ${publicBase}`);
+  console.log(`WEB_BASE_URL (the web app): ${webBase}`);
+
+  if (publicBase === webBase) {
+    console.warn(
+      'PUBLIC_BASE_URL and WEB_BASE_URL are identical. They address different ' +
+        'services: PUBLIC_BASE_URL must point at this API, since plan links and ' +
+        'the Google callback are served here.',
+    );
+  }
 }
 
 reportConfiguration();

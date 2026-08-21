@@ -27,13 +27,24 @@ No migrations. Tables are created on first use.
    [`render.yaml`](../render.yaml) and creates both services.
 3. Fill in the environment variables it marks as required.
 
+> **Check the hostname you actually got.** If the service name is already taken,
+> Render appends a suffix — `lifepilot-api` can become
+> `lifepilot-api-ehni.onrender.com`. Copy the real URL from the dashboard rather
+> than assuming it matches the name in `render.yaml`. Using the wrong one fails
+> in ways that look unrelated: the UI cannot reach the API, plan links 404, and
+> Google redirects to a page that does not exist.
+
 Three depend on the deployed hostnames, so set them once the service exists:
 
 | Variable | Value |
 |---|---|
-| `PUBLIC_BASE_URL` | `https://lifepilot-api.onrender.com` |
-| `WEB_BASE_URL` | the static site URL, e.g. `https://lifepilot-web.onrender.com` |
-| `GOOGLE_OAUTH_REDIRECT_URI` | `https://lifepilot-api.onrender.com/connect/google/callback` |
+| `PUBLIC_BASE_URL` | the **API** URL — plan links and the Google callback are served here |
+| `WEB_BASE_URL` | the **static site** URL — the CORS origin and the base for reset links |
+| `GOOGLE_OAUTH_REDIRECT_URI` | the **API** URL + `/connect/google/callback` |
+
+Two of these point at the API and one at the web app; mixing them up is the
+easiest mistake to make here. On boot the API prints both resolved URLs and
+warns if they are identical, so the Render log will tell you.
 
 `WEB_BASE_URL` is both the origin CORS allows and the base for password-reset
 links. Getting it wrong shows up as the web app being unable to reach the API.
