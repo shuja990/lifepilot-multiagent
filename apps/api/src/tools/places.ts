@@ -3,7 +3,7 @@
  *
  * Chosen over Google Places because the free plan is 3,000 credits/day with no
  * credit card, versus Google's per-SKU free counts which a chatty agent burns
- * through quickly. See docs/PLAN.md §3.1.
+ * through quickly. See docs/ARCHITECTURE.md.
  *
  * The tradeoff is real and is surfaced to the agent in `dataNotes` rather than
  * hidden: OSM has no ratings, reviews, or photos. Anything ranking-shaped must

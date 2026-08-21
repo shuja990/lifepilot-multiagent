@@ -1,43 +1,39 @@
 # LifePilot
 
-A multi-agent personal planning assistant built on **Google ADK for TypeScript**.
+A multi-agent planning assistant built on Google ADK for TypeScript.
 
-Describe a real goal in plain language — *"plan a weekend in Lisbon under €400"*,
+Describe a goal in plain language — *"plan a weekend in Lisbon under €400"*,
 *"help me buy noise-cancelling headphones"* — and an orchestrator routes it to
-the right specialists. They research it in parallel, cost it, put it
-in order, check each other's work, and then **stop and ask before doing anything
-consequential**.
-
-> **Status:** Phases 0–7 of 8 complete and verified against live APIs.
-> Remaining: prompt-cache measurement and the final write-up.
-> Build plan and reasoning: [docs/PLAN.md](docs/PLAN.md).
+the right specialists. They research it in parallel, cost it, put it in order,
+check each other's work, and stop for approval before anything with a real-world
+effect.
 
 ![The agent timeline](docs/screenshots/desktop-timeline.png)
 
 ---
 
-## What this is meant to prove
+## What it does
 
-Four things, live rather than described:
+- **Routes by intent.** A root `LlmAgent` picks between a single-tool quick
+  answer, a full planning pipeline, and an action agent — so a currency question
+  does not run a dozen agents.
+- **Uses real tools.** Weather, places, web search, product listings, currency
+  and stored preferences. Every result comes from a live API.
+- **Runs across providers.** Gemini by default, with Groq, DeepSeek and
+  OpenRouter through a `BaseLlm` adapter, and automatic failover between them.
+- **Stops for approval.** Anything consequential suspends the run until a person
+  approves it, then acts — including on a schedule, after the fact.
+- **Remembers.** Preferences and conversations persist per account.
 
-1. **Real orchestration** — an `LlmAgent` that *decides* which specialists run, not a fixed pipeline
-2. **Real tools** — actual API calls returning real data, never stubs
-3. **Model routing** — one agent graph across several providers, with automatic failover
-4. **Human-in-the-loop** — a run that genuinely halts, then acts autonomously later
-
-It works **anywhere**: weather, places and currency come from worldwide sources
-(Open-Meteo, OpenStreetMap, 160+ currencies), so the same prompt works for Lisbon,
-Tokyo or Nairobi with no configuration.
-
-It also runs on **almost nothing**: every service has a free tier, and the
-deployed demo's happy path spends $0.
+Weather, places and currency come from worldwide sources, so the same prompt
+works for Lisbon, Tokyo or Nairobi with no configuration.
 
 ---
 
 ## Architecture
 
 ```
-                        orchestrator  (LlmAgent — decides, does not answer)
+                        orchestrator  (decides, does not answer)
                               │
         ┌─────────────────────┼─────────────────────┐
         ▼                     ▼                     ▼
@@ -57,16 +53,11 @@ deployed demo's happy path spends $0.
                                         presenter ─ renders the answer
 ```
 
-**Models are assigned by task shape, not uniformly.** Routing is classification,
-so the orchestrator runs on Flash-Lite. Research fans out four ways, so it runs
-on Flash-Lite too. Judgement work runs on Flash. The **verifier deliberately runs
-on a different provider from the agents that wrote the plan**, so its critique
-cannot be self-confirming — a better argument for multi-provider support than
-"we support many models".
+Models are assigned by task shape. Routing and research run on Flash-Lite;
+judgement work runs on Flash. The verifier runs on a different provider from the
+agents that wrote the plan, so its critique is not self-confirming.
 
-Every tier has a fallback chain, and fallbacks are matched to context size:
-Groq's free tier caps a request at 8,000 tokens, so it backs the small fan-out
-agents and never the late pipeline agents that carry 12k of findings.
+More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -74,24 +65,21 @@ agents and never the late pipeline agents that carry 12k of findings.
 
 | Layer | Choice |
 |---|---|
-| Agents | `@google/adk` **1.6.0**, pinned exact |
-| LLM | Gemini 3.6 Flash / 3.5 Flash-Lite, plus Groq · DeepSeek · OpenRouter |
-| Multi-provider | A hand-written `BaseLlm` adapter — ADK-TS ships no non-Gemini models |
-| API | Node 22 · TypeScript strict · Hono · SSE |
-| Web | Next.js App Router, hand-written CSS |
-| Auth | scrypt hashing, HMAC tokens, single-use reset (`node:crypto`) |
-| Deploy | Render (API) · Vercel (web) · Neon (Postgres) |
-| Calendar | `.ics` by default; optional Google Calendar OAuth |
-| Data | Neon Postgres via ADK `DatabaseSessionService` |
-| Contracts | Zod schemas shared by API **and** web |
+| Agents | `@google/adk` 1.6.0 |
+| Models | Gemini Flash / Flash-Lite, Groq, DeepSeek, OpenRouter |
+| API | Node 22 · TypeScript · Hono · SSE |
+| Web | Next.js App Router |
+| Data | Postgres via ADK `DatabaseSessionService` |
+| Auth | scrypt hashing, HMAC tokens, single-use password reset |
+| Contracts | Zod schemas shared by API and web |
 
 ---
 
-## Quick start
+## Running it
 
 ```bash
 npm install
-cp .env.example .env          # every key is free; links are in the file
+cp .env.example .env          # every key has a free tier; links are in the file
 npm run build --workspace @lifepilot/shared
 npm test
 
@@ -99,158 +87,79 @@ npm run dev --workspace @lifepilot/api    # API → :8080
 npm run dev --workspace @lifepilot/web    # web → :3100
 ```
 
-### From the terminal
-
-Every layer runs without the UI, which is how it was built and debugged.
+Every layer also runs from the terminal, without the UI:
 
 ```bash
-# individual tools — no agent, no LLM in the loop
+# tools, with no agent and no model involved
 npm run tool -- weather Lisbon 3
 npm run tool -- places Tokyo cafe 3000 5
 npm run tool -- currency 250 USD JPY
 
 # agents
-npm run agent -- "what is 250 USD in yen?"                  # orchestrator
-npm run agent -- --graph "plan a weekend in Lisbon"         # full pipeline
-npm run agent -- --baseline "plan a weekend in Lisbon"      # Phase 1 control
-npm run agent -- --model groq/openai/gpt-oss-120b "..."     # another provider
+npm run agent -- "what is 250 USD in yen?"             # orchestrator
+npm run agent -- --graph "plan a weekend in Lisbon"    # full pipeline
+npm run agent -- --model groq/openai/gpt-oss-120b "…"  # another provider
 
-# the approval gate
+# approvals and the scheduler
 npm run approve -- list
 npm run approve -- approve <approvalId>
-npm run tick                                                # fire due reminders
+npm run tick
 ```
 
 ---
 
-## The parts worth reading
+## Code worth reading
 
 **`apps/api/src/models/openai-compatible.ts`** — ADK for TypeScript ships model
-classes for Gemini and Apigee only, and LiteLLM (the Python escape hatch) has no
-TS equivalent, so multi-provider support meant implementing `BaseLlm` directly.
-One adapter covers Groq, DeepSeek and OpenRouter. The HTTP call is the easy part;
-the work is translating between genai's `Content` and OpenAI's message and
-tool-call shapes in both directions, and converting Gemini's schema dialect into
-strict JSON Schema.
+classes for Gemini only, so multi-provider support meant implementing `BaseLlm`
+directly. One adapter covers Groq, DeepSeek and OpenRouter. Most of the work is
+translating between the genai `Content` shape and OpenAI's messages and tool
+calls in both directions, and converting Gemini's schema dialect to strict JSON
+Schema.
 
-**`apps/api/src/tools/approval.ts`** and **`src/memory/approvals.ts`** — the
-human-in-the-loop gate. The run genuinely suspends, the decision lives in
-Postgres, and the gate is enforced in code rather than only in the prompt: an
-agent that forgets to ask still cannot act.
+**`apps/api/src/tools/approval.ts`** — the approval gate. The run suspends, the
+decision lives in Postgres, and the gate is enforced in code rather than only in
+the prompt, so an agent that skips asking still cannot act.
 
-**`packages/shared/src/schemas.ts`** — one set of Zod schemas feeding ADK's tool
-declarations *and* the web app, so the two cannot drift.
+**`apps/web/app/lib/activity.ts`** — turns the raw agent event stream into
+sentences a person would want to read, with the underlying payload one click
+away.
 
-**`apps/web/app/lib/activity.ts`** — the agent stream is engineering output:
-`transfer_to_agent`, argument objects, internal agent names. This turns it into
-sentences a person would want to read ("Checking the 3-day forecast for
-Islamabad"), folds results into the call that produced them, and keeps the raw
-payload one click away. Transparency is better served by this than by the JSON.
+**`packages/shared/src/schemas.ts`** — one set of Zod schemas feeding both the
+tool declarations and the web app.
 
 ---
 
-## Tool layer
+## Tools
 
-All verified against live APIs; latencies are measured, not estimated.
-
-| Tool | Provider | Free tier | Latency |
-|---|---|---|---|
-| `weather` | Open-Meteo | no key needed | ~1.7 s |
-| `currency` | ExchangeRate-API | no key needed | ~0.4 s |
-| `geocode` / `places` | Geoapify | 3,000 credits/day | ~0.9 / 1.3 s |
-| `search` | Tavily | 1,000 credits/month | ~2.5 s |
-| `products` | Tavily, retail-scoped | shares search quota | ~3.9 s |
-| `preferences` | Postgres | — | ~5 ms |
+| Tool | Source | Key needed |
+|---|---|---|
+| `weather` | Open-Meteo | no |
+| `currency` | ExchangeRate-API | no |
+| `geocode` / `places` | Geoapify | yes |
+| `search` | Tavily | yes |
+| `products` | Tavily, retail-scoped | yes |
+| `preferences` | Postgres | — |
 
 Three rules the tool layer holds to:
 
-**Nothing is substituted for missing data.** Where a provider returns null, the
-tool returns null. An early version coalesced a missing temperature to `0` and
-reported 0 °C for a warm city in September — a plausible number no downstream
-check could catch.
-
-**No LLM runs inside a tool**, so no tool result can be invented. `products`
-returns listings with `priceApprox: null` rather than guessing a price from a
-title.
-
-**Tools never throw across the agent boundary.** They return
-`{ ok, data | error }`, because a model recovers from an error object far better
-than a `ParallelAgent` branch recovers from an exception.
+- **Missing data stays missing.** Where a provider returns null, the tool returns
+  null rather than a plausible substitute.
+- **No model runs inside a tool**, so nothing a tool returns is invented.
+  `products` returns listings without prices rather than guessing them.
+- **Tools return `{ ok, data | error }`** instead of throwing, so one failed
+  branch does not take down a parallel run.
 
 ---
 
-## Deployment
+## Deploying
 
-Full walkthrough: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
+See [docs/DEPLOY.md](docs/DEPLOY.md). [`render.yaml`](render.yaml) provisions
+both services — the UI as a static site, the API as a Docker service — with
+Postgres on Neon and a GitHub Actions cron driving the scheduler.
 
-| Piece | Host | Notes |
-|---|---|---|
-| API | Render (Docker) | `render.yaml` blueprint; 750 instance-hours free |
-| Web | Vercel | root directory `apps/web`; set `NEXT_PUBLIC_API_URL` |
-| Database | Neon | free tier, scale-to-zero, no migrations to run |
-| Scheduler | GitHub Actions | `.github/workflows/tick.yml`, twice an hour |
-
-Hugging Face Spaces was the original plan; Docker Spaces moved to paid. Fly.io
-dropped its free tier and now wants a card. Render and Koyeb are what is left
-with a genuine free tier, and the Dockerfile runs on either.
-
-**The free tier sleeps.** Render spins a free service down after 15 minutes idle,
-so the first request after a quiet period waits about a minute. The web app shows
-a "waking the server" notice rather than looking broken, but plan for it when you
-send someone a link.
-
-The scheduler is an **external** cron on purpose. Free-tier hosts sleep, so an
-in-process timer would not fire late — it would not fire at all, and the
-autonomous behaviour that justifies the approval gate would quietly stop
-existing. The ping drives the schedule and wakes the host in one move.
-
-Set `API_URL` and `TICK_SECRET` as repository secrets. `/tick` fails closed: no
-secret configured, no execution.
-
-**The workflow never fails the job.** An earlier version exited non-zero whenever
-the API did not answer, so before deployment every scheduled run failed and
-GitHub emailed a failure notice every 15 minutes. A scheduler that spams you into
-disabling it has negative value, so problems are raised as run-log warnings and
-the job skips cleanly when the secrets are absent.
-
----
-
-## Honest limitations
-
-Kept here deliberately. A portfolio project that hides its edges is a tutorial.
-
-- **Authentication is deliberately simple.** Real accounts with scrypt-hashed
-  passwords, HMAC-signed tokens and single-use password reset, written against
-  node:crypto rather than pulled from a dependency — but there is no email
-  verification and no rate limiting on sign-in. Those are the next things to add
-  before anyone should trust it with real data.
-- **Password reset needs an email provider to be useful.** Set `RESEND_API_KEY`
-  (free tier, no card) or the reset link is written to the server log instead.
-  The link is never returned in the HTTP response — that would let anyone reset
-  any account.
-- **Google Calendar is opt-in and needs your own OAuth client.** Without
-  `GOOGLE_OAUTH_CLIENT_ID` the feature reports itself unavailable and plans still
-  produce a downloadable `.ics`, which needs no scope at all.
-- **Place data has no ratings, reviews or photos** — an OpenStreetMap
-  consequence, surfaced to the agents rather than papered over, so ranking
-  questions go to web search instead of being invented.
-- **Product prices are not extracted yet.**
-- **Booking and payment are simulated** and labelled as such. Saving a plan,
-  generating a calendar file and scheduling reminders are real.
-- **Google Calendar writes are deliberately absent.** `calendar.events` is a
-  sensitive scope: an unverified app shows a security warning and is capped at
-  100 users for the project's lifetime, which would break "a stranger with a link
-  can finish the flow". An `.ics` file needs no scope at all.
-- **The free tier is the binding constraint.** Gemini's free quota is per model
-  per day and is easy to exhaust while developing. Model ids are pinned, because
-  `gemini-flash-latest` had drifted onto a model with a 20-requests-per-day cap.
-- **The Phase 3 comparison is unfinished.** The graph is demonstrably stronger at
-  research than the single-agent baseline — 7 tool calls including three real
-  place lookups, against 3 and none — but a clean end-to-end judgement is still
-  pending. The baseline is kept in `docs/baselines/` so the claim stays testable.
-- **Place coverage varies by region.** OpenStreetMap is dense in cities and
-  thinner in rural areas, so results are better for Lisbon than for a village.
-  The agents are told this and fall back to web search rather than inventing.
+The API sleeps after 15 minutes idle and takes about a minute to wake. The UI is
+static, so it loads instantly and shows a waking notice while the API returns.
 
 ---
 
@@ -262,10 +171,17 @@ Kept here deliberately. A portfolio project that hides its edges is a tutorial.
 
 ---
 
-## Documentation
+## Limitations
 
-| Document | What it is |
-|---|---|
-| [docs/PLAN.md](docs/PLAN.md) | Decisions, costs, architecture, phases, risks |
-| [docs/WORKFLOW.md](docs/WORKFLOW.md) | The review/verify pipeline used to build it |
-| [docs/baselines/](docs/baselines/) | Saved outputs the agent graph is measured against |
+- No email verification, and no rate limiting on sign-in.
+- Password reset needs `RESEND_API_KEY`; without it the link goes to the server
+  log rather than an inbox.
+- Google Calendar is optional and needs your own OAuth client. Plans always
+  produce a downloadable `.ics`, which needs no OAuth at all.
+- Place data has no ratings, reviews or photos, and OpenStreetMap coverage is
+  thinner outside cities. Ranking questions go to web search instead.
+- Product prices are not extracted yet.
+- Booking and payment are simulated and labelled as such. Saving a plan,
+  generating a calendar file and scheduling reminders are real.
+- Model free tiers are the binding constraint; model ids are pinned rather than
+  using `-latest` aliases.

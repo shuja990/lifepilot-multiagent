@@ -1,7 +1,7 @@
 /**
  * Standalone tool runner.
  *
- * docs/PLAN.md makes this a rule rather than a convenience: every tool must be
+ * This is a project rule rather than a convenience: every tool must be
  * runnable without an agent, because tools get debugged far more often than
  * agents do and you should never need an LLM in the loop to find out whether
  * an API call works.

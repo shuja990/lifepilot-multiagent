@@ -1,7 +1,7 @@
 /**
  * Product search — retail-scoped web search.
  *
- * There is no good free structured product API (see docs/PLAN.md §3.3), so
+ * There is no good free structured product API (see docs/ARCHITECTURE.md), so
  * this is retrieval scoped to retail domains. Structured price extraction is
  * deliberately NOT done here: no LLM runs inside the tool layer, so
  * `priceApprox` stays null and nothing in the output is ever invented. The

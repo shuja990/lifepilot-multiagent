@@ -1,17 +1,39 @@
 # Render blueprint — https://render.com/docs/blueprint-spec
 #
-# Deploys the API only. The web app goes to Vercel, which is better at Next.js
-# and free for this size of project.
+# Two services: the UI as a static site, the API as a Docker web service.
 #
-# Free plan realities worth knowing before you demo:
-#   - the service spins down after 15 minutes with no traffic, and the next
-#     request waits roughly a minute while it wakes
-#   - 750 instance-hours per month, which is about one always-on service
-#   - no credit card required
-#
-# The cold start is why the web app shows a waking state rather than hanging.
+# On the free plan the API sleeps after 15 minutes of inactivity and takes about
+# a minute to wake. The static site never sleeps, so the page loads immediately
+# and shows a waking notice while the API comes back.
 
 services:
+  # ------------------------------------------------------------------ web app
+  # A static site, not a web service. Static sites are free, CDN-served and
+  # never sleep, so the page always loads instantly even when the API behind it
+  # is still waking. Putting the UI on a free web service instead would mean a
+  # blank screen for the first minute after an idle period.
+  - type: web
+    name: lifepilot-web
+    runtime: static
+    buildCommand: npm ci && npm run build --workspace @lifepilot/shared && npm run build --workspace @lifepilot/web
+    staticPublishPath: ./apps/web/out
+    pullRequestPreviewsEnabled: false
+    buildFilter:
+      paths:
+        - apps/web/**
+        - packages/shared/**
+    routes:
+      # Next exports /reset as reset.html; without this the route 404s on a
+      # hard refresh or when the emailed reset link is opened directly.
+      - type: rewrite
+        source: /reset
+        destination: /reset.html
+    envVars:
+      # Baked into the bundle at build time, so changing it needs a redeploy.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+
+  # ---------------------------------------------------------------------- api
   - type: web
     name: lifepilot-api
     runtime: docker

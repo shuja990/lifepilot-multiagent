@@ -1,7 +1,7 @@
 /**
  * The ONLY place model names live.
  *
- * A project rule from docs/PLAN.md: any agent hardcoding a model string is a
+ * A project rule: any agent hardcoding a model string is a
  * bug. Routing policy lands here too (Phase 4), so the answer to "which model
  * ran this?" is always one file.
  */

@@ -7,7 +7,7 @@
  * ~30 currencies and exclude most of the world — PKR, the currency this was
  * first tested with, returned a bare 404, which would have surfaced as a broken
  * BudgetAgent much later. Swapped here; the tool surface is unchanged, which is
- * the whole point of keeping providers behind a thin adapter (docs/PLAN.md §8).
+ * the whole point of keeping providers behind a thin adapter (docs/ARCHITECTURE.md).
  *
  * Rates are daily reference rates, not the rate a traveller gets at a counter.
  * The BudgetAgent should present converted figures as approximate.

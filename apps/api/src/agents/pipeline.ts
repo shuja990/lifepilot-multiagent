@@ -11,7 +11,7 @@
  *     |
  *   Presenter         renders the final answer
  *
- * Models are assigned by task shape, not uniformly (docs/PLAN.md §3.2):
+ * Models are assigned by task shape, not uniformly (docs/ARCHITECTURE.md):
  * research is high-volume and low-judgement so it runs on Groq; the planning
  * pipeline needs judgement so it runs on Gemini; and the verifier deliberately
  * runs on a DIFFERENT provider from the agents that wrote the plan, so the

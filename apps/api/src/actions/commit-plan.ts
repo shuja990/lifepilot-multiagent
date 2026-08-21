@@ -1,7 +1,7 @@
 /**
  * What "go ahead" actually does.
  *
- * Three real effects, none of which need the user to log in (docs/PLAN.md §4.3):
+ * Three real effects, none of which need the user to log in (docs/ARCHITECTURE.md):
  *
  *   A  the plan is persisted to a permanent, shareable URL
  *   B  an .ics file is generated — calendar integration with no OAuth scope

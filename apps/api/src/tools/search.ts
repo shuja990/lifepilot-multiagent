@@ -1,7 +1,7 @@
 /**
  * Web search — Tavily. Free tier is 1,000 credits/month with no credit card,
  * which is the most generous of the current options (Brave removed its free
- * tier in Feb 2026). See docs/PLAN.md §3.3.
+ * tier in Feb 2026). See docs/ARCHITECTURE.md.
  *
  * Credit discipline matters here: a 'basic' search costs 1 credit and an
  * 'advanced' one costs 2. With a ParallelAgent fan-out it is easy to spend a

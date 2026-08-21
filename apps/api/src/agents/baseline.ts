@@ -1,7 +1,7 @@
 /**
  * Phase 1: the single-agent baseline.
  *
- * One LlmAgent with every tool. This exists to be BEATEN — docs/PLAN.md Phase 3
+ * One LlmAgent with every tool. This exists to be BEATEN — docs/ARCHITECTURE.md
  * requires the multi-agent graph to produce measurably better output on the
  * same prompt, and without a saved baseline that claim is unfalsifiable. Plenty
  * of multi-agent systems are slower and worse than one good prompt; we should
