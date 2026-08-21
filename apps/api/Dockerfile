@@ -19,6 +19,11 @@ COPY apps/web/package.json apps/web/
 # Dev dependencies are required here — TypeScript compiles during this stage.
 RUN npm ci --workspace @lifepilot/shared --workspace @lifepilot/api --include-workspace-root
 
+# The root tsconfig both workspaces extend. Without it `tsc` fails to resolve
+# its base config and exits 2 — which only shows up in the image, since a local
+# build always has the file sitting above it.
+COPY tsconfig.base.json ./
+
 COPY packages/shared packages/shared
 COPY apps/api apps/api
 

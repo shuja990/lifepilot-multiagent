@@ -1,0 +1,29 @@
+# The build context is the repo root, so without this Docker ships several
+# hundred megabytes of node_modules and git history to the daemon on every
+# build. Dependencies are installed inside the image from the lockfile.
+node_modules
+**/node_modules
+
+# Build output. The image compiles its own; copying host artifacts in risks
+# shipping something stale, and on a different platform than it was built for.
+dist
+**/dist
+.next
+**/.next
+out
+**/out
+
+.git
+.gitignore
+.github
+
+# Never let real credentials into an image layer.
+.env
+.env.*
+!.env.example
+
+.data
+docs
+*.md
+!README.md
+.playwright-mcp
